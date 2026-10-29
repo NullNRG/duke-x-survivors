@@ -1,0 +1,27 @@
+# No redistribution of copyrighted game data or private archives
+*.grp
+*.GRP
+*.art
+*.ART
+*.map
+*.MAP
+*.rts
+*.RTS
+*.voc
+*.VOC
+*.data
+*.DATA
+*.zip
+*.7z
+*.rar
+*.pak
+*.pk3
+*.pk4
+*.psd
+*.xcf
+.env*
+*.key
+*.pem
+node_modules/
+.DS_Store
+__pycache__/
