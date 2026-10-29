@@ -78,10 +78,12 @@
   #settings .foot button { border:1px solid #3a3a42; background:#1b1b20; color:#e8e2d6; padding:8px 20px; border-radius:8px; cursor:pointer; font:inherit; }
   #settings .foot button:hover { background:#26262d; }
 </style>
+<script src="./dukex-v47-art.js?v=48"></script>
 <script src="./engine-boot.js"></script>
 <script src="./dukex-diagnostics.js"></script>
 <script src="./dukex-video-probe.js"></script>
 <script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}</script>
+<meta name="dukex-native-version" content="V48">
 </head>
 <body>
 <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
@@ -705,6 +707,7 @@
       e32ApplyScreenSetup();
       e32InstallCfgMirror();
     },
+    function() { if (window.DukeXV47Art) window.DukeXV47Art.preRun(Module); },
     // eduke32-net addition: apply a downloaded GRP choice before the engine runs.
     applyNetGrpChoice,
     // Prefer a persisted registered/Atomic main GRP over the bundled shareware.
@@ -1130,13 +1133,14 @@ body.dx-show-debug-video #dx-video-probe{z-index:1030!important;bottom:calc(63px
  <div id="dx-level-foot">Weapons equip automatically and fire concurrently. Level-up pauses solo runs.</div>
  </div></section>
 </div>
-<script src="./dukex-controls-v16.js?v=33"></script>
+<script src="./dukex-controls-v16.js?v=48"></script>
 
 
 
 
 
 <!-- Classic is default. Three.js loads lazily only when enabled in Settings. -->
+<script src="./dukex-v46-menu-touch.js?v=48"></script>
 <script src="./dukex-v43-boot.js"></script>
 <script src="./dukex-renderer-settings.js"></script>
 </body>

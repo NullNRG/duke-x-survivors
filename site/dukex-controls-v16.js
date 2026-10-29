@@ -12,7 +12,7 @@ function dxV21EnsureShell(){
  if(!document.body)throw Error('DXV21: control script loaded before document.body');
  if(!document.getElementById('dx-v21-ui-style')){
   const style=document.createElement('style');style.id='dx-v21-ui-style';
-  style.textContent="#duke-x-controls{display:none;position:fixed;inset:0;z-index:1050;pointer-events:none;color:#f2dfb8;font:700 13px system-ui,sans-serif;user-select:none;-webkit-user-select:none;touch-action:pan-x pan-y}\n#duke-x-controls *{box-sizing:border-box;-webkit-user-select:none;user-select:none}\n#duke-x-controls button{cursor:pointer;touch-action:manipulation;pointer-events:auto;color:#f4e8c7;font:800 12px system-ui,sans-serif;letter-spacing:.5px;border:1px solid #9e753e;background:linear-gradient(165deg,#48372d,#191b20);border-radius:7px;box-shadow:inset 0 1px #fff2,0 3px 8px #0009}\n#duke-x-controls button:active{filter:brightness(1.35)}\n#dx-move-zone,#dx-aim-zone{display:none;position:absolute;bottom:0;height:57%;width:43%;pointer-events:auto;touch-action:none}\n#dx-move-zone{left:0}#dx-aim-zone{right:0;bottom:calc(158px + env(safe-area-inset-bottom));height:42%;}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open) #dx-move-zone,#duke-x-controls.dx-in-game:not(.dx-overlay-open) #dx-aim-zone{display:block}\n.dx-pad{display:none;position:absolute;width:116px;height:116px;left:90px;top:calc(100% - 107px - env(safe-area-inset-bottom));margin:-58px 0 0 -58px;border-radius:100%;border:2px solid #ebb454a6;background:radial-gradient(circle,#ebae2e22,#0d1b2c88);box-shadow:inset 0 0 18px #000b,0 0 14px #0009;transform:none;pointer-events:none;opacity:.40;transition:opacity .10s}\n#dx-aim-pad{left:auto;right:calc(35px + env(safe-area-inset-right));top:calc(100% - 245px - env(safe-area-inset-bottom));margin:-58px 0 0 0}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open):not(.dx-player-dead) .dx-pad{display:block}\n#duke-x-controls.dx-player-dead #dx-move-zone,#duke-x-controls.dx-player-dead #dx-aim-zone,#duke-x-controls.dx-player-dead #dx-field-tools{display:none!important}\n#dx-respawn{display:none!important;position:absolute;bottom:calc(70px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:min(300px,80vw);height:60px;border-color:#ffd378!important;background:linear-gradient(#9e431c,#451919)!important;font-size:19px!important;z-index:1052}\n#duke-x-controls.dx-player-dead:not(.dx-overlay-open) #dx-respawn{display:block!important}\n\n.dx-pad.active{opacity:1}.dx-pad .knob{position:absolute;left:38px;top:38px;width:40px;height:40px;border-radius:50%;background:radial-gradient(circle at 32% 20%,#ffe4a2,#a85c26 75%,#3d2019);box-shadow:0 2px 9px #000b}\n#dx-aim-pad{border-color:#cb5233bb}#dx-aim-pad .knob{background:radial-gradient(circle at 35% 25%,#ffd0b0,#ac3b27)}\n#dx-field-tools{display:none;position:absolute;right:8px;bottom:calc(13px + env(safe-area-inset-bottom));width:120px;gap:5px;grid-template-columns:repeat(2,1fr)}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open) #dx-field-tools{display:grid}\n#dx-field-tools button{height:41px;min-width:0;font-size:10px}\n#dx-field-tools #dx-blast{grid-column:span 2;background:linear-gradient(#ad4b25,#5b1d18);border-color:#eebd63;font-size:14px;height:48px}\n#dx-field-launch{pointer-events:auto;position:absolute;right:calc(8px + env(safe-area-inset-right));top:calc(8px + env(safe-area-inset-top));width:42px;height:37px;font-size:21px!important;z-index:1060}\n#duke-x-controls:not(.dx-in-game) #dx-field-launch{top:auto;bottom:calc(12px + env(safe-area-inset-bottom));width:46px;height:46px;transform:none}\n#dx-field-sheet{display:none;pointer-events:auto;position:absolute;inset:0;background:#070a11de;padding:calc(15px + env(safe-area-inset-top)) 12px calc(15px + env(safe-area-inset-bottom));overflow-y:auto;touch-action:pan-y;z-index:1058}\n#duke-x-controls.dx-menu-open #dx-field-sheet{display:flex;align-items:center;justify-content:center}\n.dx-panel{width:min(650px,100%);max-height:calc(100dvh - 34px);overflow:auto;background:linear-gradient(150deg,#372c25,#13191f 40%,#261d1b);border:2px solid #97733e;box-shadow:0 0 0 4px #08080e,0 12px 44px #000e;border-radius:4px;touch-action:pan-y;padding:12px}\n.dx-header{display:flex;align-items:center;justify-content:space-between;gap:8px;font:900 19px Georgia,serif;color:#ffc968;letter-spacing:1px;text-shadow:0 2px #411d13}\n.dx-header button{min-width:38px;min-height:34px}\n.dx-sub{color:#bcae97;font:600 11px system-ui;margin:6px 0 12px;line-height:1.5}\n.dx-tabs{display:flex;gap:5px;flex-wrap:wrap;margin:9px 0}.dx-tabs button{padding:9px 10px;flex:1}.dx-tabs button[aria-selected=\"true\"]{color:#211a15;background:linear-gradient(#ecca76,#a76a31)}\n.dx-menu-section{display:none}.dx-menu-section.active{display:block}\n.dx-menu-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:6px}.dx-inventory-item{border:1px solid #68533b;border-radius:5px;padding:9px;background:#0a0f17bb}.dx-inventory-item b{display:block;font-size:11px}.dx-inventory-item small{font-weight:500;color:#d5bc85}\n.dx-profile{display:block;width:100%;text-align:left;padding:10px;margin:5px 0}.dx-profile.selected{border-color:#ffd379!important;box-shadow:0 0 0 1px #f0b63f}\n.dx-actionline{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.dx-actionline button{padding:10px 13px}\n#dx-input-monitor{white-space:pre-line;font:600 11px ui-monospace,monospace;line-height:1.65;border:1px solid #87683c;padding:9px;border-radius:5px;overflow-wrap:anywhere;background:#111827}.dx-hint{font-size:11px;color:#aaa89b;font-weight:500;line-height:1.5}\n#dx-level-mask{display:none;position:absolute;inset:0;z-index:1100;pointer-events:auto;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,#1b1e25ee,#04050afb);padding:calc(25px + env(safe-area-inset-top)) 10px calc(14px + env(safe-area-inset-bottom));overflow:auto;touch-action:pan-y}\n#dx-level-card{width:min(700px,100%);max-height:95dvh;overflow-y:auto;border:3px ridge #ad843b;background:linear-gradient(165deg,#402921,#101723 55%,#2a2319);box-shadow:0 0 0 4px #0c0807,0 18px 55px #000f;padding:12px;touch-action:pan-y}\n#dx-level-title{text-align:center;font:900 clamp(21px,4.3vw,31px) Georgia,serif;letter-spacing:2px;color:#ffd178;text-shadow:0 2px #522316}\n#dx-level-sub{text-align:center;color:#e8d6b7;margin:4px 0 10px;font-size:11px}\n#dx-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}\n#duke-x-controls .dx-upgrade{display:flex;flex-direction:column;align-items:center;padding:10px 6px;min-height:168px;justify-content:space-between;border:1px solid #a17d48;background:linear-gradient(150deg,#5c4430,#151b28 56%,#2a2520);border-radius:4px;min-width:0}\n.dx-icon{display:flex;justify-content:center;align-items:center;width:55px;height:55px;border:1px solid #8f6f48;border-radius:5px;background:#0008}\n.dx-icon img{max-width:49px;max-height:49px;object-fit:contain;image-rendering:pixelated;filter:drop-shadow(0 0 4px #f3af3770)}\n.dx-symbol{font:900 28px system-ui;color:#eab952}.dx-type{font-size:9px;color:#9acde5;margin-top:5px}\n.dx-power{font-size:clamp(10px,2.3vw,14px);color:#ffda8d;text-align:center;margin:6px 0 2px;overflow-wrap:anywhere}\n.dx-desc{font-size:10px;font-weight:500;color:#cfc0af;text-align:center;line-height:1.3;min-height:24px}\n.dx-tier{font-size:10px;color:#e9bf73;margin-top:7px}.dx-evo{font-size:10px;color:#ff8f63}\n#dx-level-actions{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px}#dx-level-actions button{padding:9px 12px}\n#dx-level-foot{text-align:center;font-size:10px;color:#b6a48c;margin-top:8px}\nbody:not(.dx-show-debug-log) #dukex-diag,body:not(.dx-show-debug-video) #dx-video-probe{display:none!important}\nbody.dx-show-debug-log #dukex-diag{z-index:1030!important;left:6px!important;top:52px!important;max-height:68dvh!important;overflow:auto}\nbody.dx-show-debug-video #dx-video-probe{z-index:1030!important;bottom:calc(63px + env(safe-area-inset-bottom))!important;max-height:65dvh!important;overflow:auto}\n@media(max-width:420px){#dx-cards{gap:4px}#duke-x-controls .dx-upgrade{padding:7px 3px;min-height:156px}.dx-icon{width:43px;height:43px}.dx-icon img{max-width:40px;max-height:40px}#dx-field-tools{width:106px}}\n/* DXV19: Android desktop-site, stylus, foldables may not match pointer:coarse. */\n#duke-x-controls.dx-v19-touch{display:block!important}\n#duke-x-controls.dx-v19-touch:not(.dx-in-game) #dx-move-pad{display:none}\n/* MOVE stays anchored on screen and receives a real visible, labeled pad. */\n#duke-x-controls #dx-move-zone{left:0;bottom:0;width:min(48vw,360px);height:48dvh;z-index:1051}\n#duke-x-controls #dx-move-pad{left:calc(17px + env(safe-area-inset-left));right:auto;top:auto;bottom:calc(16px + env(safe-area-inset-bottom));margin:0;width:132px;height:132px;z-index:1053;opacity:.85;background:radial-gradient(circle at 40% 30%,#dba54337,#192b458a 75%);border:3px solid #ffd178;box-shadow:0 0 0 5px #0005,0 0 26px #e5a74277}\n#duke-x-controls #dx-move-pad .knob{left:43px;top:43px}\n#duke-x-controls #dx-move-pad::after{content:'MOVE';position:absolute;bottom:6px;left:0;width:100%;color:#ffe3a0;font:900 11px system-ui,sans-serif;letter-spacing:2px;text-align:center;pointer-events:none;text-shadow:0 2px 3px #000}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open):not(.dx-player-dead) #dx-move-pad{display:block!important}\n#duke-x-controls.dx-player-dead #dx-move-pad{display:none!important}\n@media(hover:none) and (pointer:coarse){#duke-x-controls{display:block}}";
+  style.textContent="#duke-x-controls{display:none;position:fixed;inset:0;z-index:1050;pointer-events:none;color:#f2dfb8;font:700 13px system-ui,sans-serif;user-select:none;-webkit-user-select:none;touch-action:pan-x pan-y}\n#duke-x-controls *{box-sizing:border-box;-webkit-user-select:none;user-select:none}\n#duke-x-controls button{cursor:pointer;touch-action:manipulation;pointer-events:auto;color:#f4e8c7;font:800 12px system-ui,sans-serif;letter-spacing:.5px;border:1px solid #9e753e;background:linear-gradient(165deg,#48372d,#191b20);border-radius:7px;box-shadow:inset 0 1px #fff2,0 3px 8px #0009}\n#duke-x-controls button:active{filter:brightness(1.35)}\n#dx-move-zone,#dx-aim-zone{display:none;position:absolute;bottom:0;height:57%;width:43%;pointer-events:auto;touch-action:none}\n#dx-move-zone{left:0}#dx-aim-zone{right:0;bottom:calc(158px + env(safe-area-inset-bottom));height:42%;}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open) #dx-move-zone,#duke-x-controls.dx-in-game:not(.dx-overlay-open) #dx-aim-zone{display:block}\n.dx-pad{display:none;position:absolute;width:116px;height:116px;left:90px;top:calc(100% - 107px - env(safe-area-inset-bottom));margin:-58px 0 0 -58px;border-radius:100%;border:2px solid #ebb454a6;background:radial-gradient(circle,#ebae2e22,#0d1b2c88);box-shadow:inset 0 0 18px #000b,0 0 14px #0009;transform:none;pointer-events:none;opacity:.40;transition:opacity .10s}\n#dx-aim-pad{left:auto;right:calc(35px + env(safe-area-inset-right));top:calc(100% - 245px - env(safe-area-inset-bottom));margin:-58px 0 0 0}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open):not(.dx-player-dead) .dx-pad{display:block}\n#duke-x-controls.dx-player-dead #dx-move-zone,#duke-x-controls.dx-player-dead #dx-aim-zone,#duke-x-controls.dx-player-dead #dx-field-tools{display:none!important}\n#dx-respawn{display:none!important;position:absolute;bottom:calc(70px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:min(300px,80vw);height:60px;border-color:#ffd378!important;background:linear-gradient(#9e431c,#451919)!important;font-size:19px!important;z-index:1052}\n#duke-x-controls.dx-player-dead:not(.dx-overlay-open) #dx-respawn{display:block!important}\n\n.dx-pad.active{opacity:1}.dx-pad .knob{position:absolute;left:38px;top:38px;width:40px;height:40px;border-radius:50%;background:radial-gradient(circle at 32% 20%,#ffe4a2,#a85c26 75%,#3d2019);box-shadow:0 2px 9px #000b}\n#dx-aim-pad{border-color:#cb5233bb}#dx-aim-pad .knob{background:radial-gradient(circle at 35% 25%,#ffd0b0,#ac3b27)}\n#dx-field-tools{display:none;position:absolute;right:8px;bottom:calc(13px + env(safe-area-inset-bottom));width:120px;gap:5px;grid-template-columns:repeat(2,1fr)}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open) #dx-field-tools{display:grid}\n#dx-field-tools button{height:41px;min-width:0;font-size:10px}\n#dx-field-tools #dx-blast{grid-column:span 2;background:linear-gradient(#ad4b25,#5b1d18);border-color:#eebd63;font-size:14px;height:48px}\n#dx-field-launch{pointer-events:auto;position:absolute;right:calc(8px + env(safe-area-inset-right));top:calc(8px + env(safe-area-inset-top));width:42px;height:37px;font-size:21px!important;z-index:1060}\n#duke-x-controls:not(.dx-in-game) #dx-field-launch{top:auto;bottom:calc(12px + env(safe-area-inset-bottom));width:46px;height:46px;transform:none}\n#dx-field-sheet{display:none;pointer-events:auto;position:absolute;inset:0;background:#070a11de;padding:calc(15px + env(safe-area-inset-top)) 12px calc(15px + env(safe-area-inset-bottom));overflow-y:auto;touch-action:pan-y;z-index:1058}\n#duke-x-controls.dx-menu-open #dx-field-sheet{display:flex;align-items:center;justify-content:center}\n.dx-panel{width:min(650px,100%);max-height:calc(100dvh - 34px);overflow:auto;background:linear-gradient(150deg,#372c25,#13191f 40%,#261d1b);border:2px solid #97733e;box-shadow:0 0 0 4px #08080e,0 12px 44px #000e;border-radius:4px;touch-action:pan-y;padding:12px}\n.dx-header{display:flex;align-items:center;justify-content:space-between;gap:8px;font:900 19px Georgia,serif;color:#ffc968;letter-spacing:1px;text-shadow:0 2px #411d13}\n.dx-header button{min-width:38px;min-height:34px}\n.dx-sub{color:#bcae97;font:600 11px system-ui;margin:6px 0 12px;line-height:1.5}\n.dx-tabs{display:flex;gap:5px;flex-wrap:wrap;margin:9px 0}.dx-tabs button{padding:9px 10px;flex:1}.dx-tabs button[aria-selected=\"true\"]{color:#211a15;background:linear-gradient(#ecca76,#a76a31)}\n.dx-menu-section{display:none}.dx-menu-section.active{display:block}\n.dx-menu-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:6px}.dx-inventory-item{border:1px solid #68533b;border-radius:5px;padding:9px;background:#0a0f17bb}.dx-inventory-item b{display:block;font-size:11px}.dx-inventory-item small{font-weight:500;color:#d5bc85}\n.dx-profile{display:block;width:100%;text-align:left;padding:10px;margin:5px 0}.dx-profile.selected{border-color:#ffd379!important;box-shadow:0 0 0 1px #f0b63f}\n.dx-actionline{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.dx-actionline button{padding:10px 13px}\n#dx-input-monitor{white-space:pre-line;font:600 11px ui-monospace,monospace;line-height:1.65;border:1px solid #87683c;padding:9px;border-radius:5px;overflow-wrap:anywhere;background:#111827}.dx-hint{font-size:11px;color:#aaa89b;font-weight:500;line-height:1.5}\n#dx-level-mask{display:none;position:absolute;inset:0;z-index:1100;pointer-events:auto;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,#1b1e25ee,#04050afb);padding:calc(25px + env(safe-area-inset-top)) 10px calc(14px + env(safe-area-inset-bottom));overflow:auto;touch-action:pan-y}\n#dx-level-card{width:min(700px,100%);max-height:95dvh;overflow-y:auto;border:3px ridge #ad843b;background:linear-gradient(165deg,#402921,#101723 55%,#2a2319);box-shadow:0 0 0 4px #0c0807,0 18px 55px #000f;padding:12px;touch-action:pan-y}\n#dx-level-title{text-align:center;font:900 clamp(21px,4.3vw,31px) Georgia,serif;letter-spacing:2px;color:#ffd178;text-shadow:0 2px #522316}\n#dx-level-sub{text-align:center;color:#e8d6b7;margin:4px 0 10px;font-size:11px}\n#dx-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}\n#duke-x-controls .dx-upgrade{display:flex;flex-direction:column;align-items:center;padding:10px 6px;min-height:168px;justify-content:space-between;border:1px solid #a17d48;background:linear-gradient(150deg,#5c4430,#151b28 56%,#2a2520);border-radius:4px;min-width:0}\n.dx-icon{display:flex;justify-content:center;align-items:center;width:55px;height:55px;border:1px solid #8f6f48;border-radius:5px;background:#0008}\n.dx-icon img{max-width:49px;max-height:49px;object-fit:contain;image-rendering:pixelated;filter:drop-shadow(0 0 4px #f3af3770)}\n.dx-symbol{font:900 28px system-ui;color:#eab952}.dx-type{font-size:9px;color:#9acde5;margin-top:5px}\n.dx-power{font-size:clamp(10px,2.3vw,14px);color:#ffda8d;text-align:center;margin:6px 0 2px;overflow-wrap:anywhere}\n.dx-desc{font-size:10px;font-weight:500;color:#cfc0af;text-align:center;line-height:1.3;min-height:24px}\n.dx-tier{font-size:10px;color:#e9bf73;margin-top:7px}.dx-evo{font-size:10px;color:#ff8f63}\n#dx-level-actions{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px}#dx-level-actions button{padding:9px 12px}\n#dx-level-foot{text-align:center;font-size:10px;color:#b6a48c;margin-top:8px}\nbody:not(.dx-show-debug-log) #dukex-diag,body:not(.dx-show-debug-video) #dx-video-probe{display:none!important}\nbody.dx-show-debug-log #dukex-diag{z-index:1030!important;left:6px!important;top:52px!important;max-height:68dvh!important;overflow:auto}\nbody.dx-show-debug-video #dx-video-probe{z-index:1030!important;bottom:calc(63px + env(safe-area-inset-bottom))!important;max-height:65dvh!important;overflow:auto}\n@media(max-width:420px){#dx-cards{gap:4px}#duke-x-controls .dx-upgrade{padding:7px 3px;min-height:156px}.dx-icon{width:43px;height:43px}.dx-icon img{max-width:40px;max-height:40px}#dx-field-tools{width:106px}}\n/* DXV19: Android desktop-site, stylus, foldables may not match pointer:coarse. */\n#duke-x-controls.dx-v19-touch{display:block!important}\n#duke-x-controls.dx-v19-touch:not(.dx-in-game) #dx-move-pad{display:none}\n/* MOVE stays anchored on screen and receives a real visible, labeled pad. */\n#duke-x-controls #dx-move-zone{left:0;bottom:0;width:min(48vw,360px);height:48dvh;z-index:1051}\n#duke-x-controls #dx-move-pad{left:calc(17px + env(safe-area-inset-left));right:auto;top:auto;bottom:calc(16px + env(safe-area-inset-bottom));margin:0;width:132px;height:132px;z-index:1053;opacity:.85;background:radial-gradient(circle at 40% 30%,#dba54337,#192b458a 75%);border:3px solid #ffd178;box-shadow:0 0 0 5px #0005,0 0 26px #e5a74277}\n#duke-x-controls #dx-move-pad .knob{left:43px;top:43px}\n#duke-x-controls #dx-move-pad::after{content:'MOVE';position:absolute;bottom:6px;left:0;width:100%;color:#ffe3a0;font:900 11px system-ui,sans-serif;letter-spacing:2px;text-align:center;pointer-events:none;text-shadow:0 2px 3px #000}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open):not(.dx-player-dead) #dx-move-pad{display:block!important}\n#duke-x-controls.dx-player-dead #dx-move-pad{display:none!important}\n/* V46: no auto display based only on coarse pointer. */";
   (document.head||document.documentElement).appendChild(style);
  }
  const previous=document.getElementById('duke-x-controls');
@@ -155,15 +155,43 @@ for(const id of ['dx-move-pad','dx-aim-pad','dx-move-zone','dx-aim-zone','dx22-t
 // specific prior generated HTML block or even the presence of a version comment.
 if(!document.getElementById('dx-v20-move-style')){
  const st=document.createElement('style');st.id='dx-v20-move-style';
- st.textContent="/* DXV19: Android desktop-site, stylus, foldables may not match pointer:coarse. */\n#duke-x-controls.dx-v19-touch{display:block!important}\n#duke-x-controls.dx-v19-touch:not(.dx-in-game) #dx-move-pad{display:none}\n/* MOVE stays anchored on screen and receives a real visible, labeled pad. */\n#duke-x-controls #dx-move-zone{left:0;bottom:0;width:min(48vw,360px);height:48dvh;z-index:1051}\n#duke-x-controls #dx-move-pad{left:calc(17px + env(safe-area-inset-left));right:auto;top:auto;bottom:calc(16px + env(safe-area-inset-bottom));margin:0;width:132px;height:132px;z-index:1053;opacity:.85;background:radial-gradient(circle at 40% 30%,#dba54337,#192b458a 75%);border:3px solid #ffd178;box-shadow:0 0 0 5px #0005,0 0 26px #e5a74277}\n#duke-x-controls #dx-move-pad .knob{left:43px;top:43px}\n#duke-x-controls #dx-move-pad::after{content:'MOVE';position:absolute;bottom:6px;left:0;width:100%;color:#ffe3a0;font:900 11px system-ui,sans-serif;letter-spacing:2px;text-align:center;pointer-events:none;text-shadow:0 2px 3px #000}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open):not(.dx-player-dead) #dx-move-pad{display:block!important}\n#duke-x-controls.dx-player-dead #dx-move-pad{display:none!important}\n@media(hover:none) and (pointer:coarse){#duke-x-controls{display:block}}";
+ st.textContent="/* DXV19: Android desktop-site, stylus, foldables may not match pointer:coarse. */\n#duke-x-controls.dx-v19-touch{display:block!important}\n#duke-x-controls.dx-v19-touch:not(.dx-in-game) #dx-move-pad{display:none}\n/* MOVE stays anchored on screen and receives a real visible, labeled pad. */\n#duke-x-controls #dx-move-zone{left:0;bottom:0;width:min(48vw,360px);height:48dvh;z-index:1051}\n#duke-x-controls #dx-move-pad{left:calc(17px + env(safe-area-inset-left));right:auto;top:auto;bottom:calc(16px + env(safe-area-inset-bottom));margin:0;width:132px;height:132px;z-index:1053;opacity:.85;background:radial-gradient(circle at 40% 30%,#dba54337,#192b458a 75%);border:3px solid #ffd178;box-shadow:0 0 0 5px #0005,0 0 26px #e5a74277}\n#duke-x-controls #dx-move-pad .knob{left:43px;top:43px}\n#duke-x-controls #dx-move-pad::after{content:'MOVE';position:absolute;bottom:6px;left:0;width:100%;color:#ffe3a0;font:900 11px system-ui,sans-serif;letter-spacing:2px;text-align:center;pointer-events:none;text-shadow:0 2px 3px #000}\n#duke-x-controls.dx-in-game:not(.dx-overlay-open):not(.dx-player-dead) #dx-move-pad{display:block!important}\n#duke-x-controls.dx-player-dead #dx-move-pad{display:none!important}\n/* V46: no auto display based only on coarse pointer. */";
  (document.head||document.documentElement).appendChild(st);
 }
 
 // DXV19: Some Android/desktop-site configurations report a fine pointer even
 // though the device has touch. The V18 CSS hid the entire HUD in that case.
-const touchCapable=(navigator.maxTouchPoints||0)>0 ||
-  matchMedia('(any-pointer:coarse)').matches || /Android|iPhone|iPad/i.test(navigator.userAgent);
-if(touchCapable)root.classList.add('dx-v19-touch');
+// V46: touchscreen laptops and desktop Chrome must not trigger mobile HUD.
+// Mobile/tablet UA and iPadOS touch+platform are intentionally distinguished
+// from a generic touch-capable computer. User may override in Settings.
+function v46IsMobileOrTablet(){
+ const ua=navigator.userAgent||'';
+ const hint=navigator.userAgentData?.mobile===true;
+ const appleTablet=/MacIntel/.test(navigator.platform||'')&&(navigator.maxTouchPoints||0)>=2;
+ return hint || /Android|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle|PlayBook/i.test(ua) || appleTablet;
+}
+const dx46TouchSelect=document.getElementById('dukex-mobile-control-mode');
+const dx46TouchStatus=document.getElementById('dukex-mobile-control-status');
+let dx46TouchMode='auto';
+try{const saved=localStorage.getItem('dukex.controls.mode');
+ if(['auto','on','off'].includes(saved))dx46TouchMode=saved;}catch(_){}
+function dx46ApplyTouchMode(initial=false){
+ const enabled=dx46TouchMode==='on'||(dx46TouchMode==='auto'&&v46IsMobileOrTablet());
+ root.classList.toggle('dx-v19-touch',enabled);
+ if(dx46TouchSelect)dx46TouchSelect.value=dx46TouchMode;
+ if(dx46TouchStatus)dx46TouchStatus.textContent=enabled?'Touch HUD enabled':'Touch HUD hidden';
+ if(!enabled && !initial && typeof resetMobileInput==='function')resetMobileInput();
+ return enabled;
+}
+if(dx46TouchSelect)dx46TouchSelect.addEventListener('change',()=>{
+ dx46TouchMode=dx46TouchSelect.value;
+ try{localStorage.setItem('dukex.controls.mode',dx46TouchMode)}catch(_){}
+ dx46ApplyTouchMode();
+});
+window.DukeXTouchControls={setMode(mode){if(!['auto','on','off'].includes(mode))return false;
+ dx46TouchMode=mode;try{localStorage.setItem('dukex.controls.mode',mode)}catch(_){}
+ return dx46ApplyTouchMode();},getMode(){return dx46TouchMode},detected:v46IsMobileOrTablet};
+dx46ApplyTouchMode(true);
 const codes={KeyW:[87,'w'],KeyE:[69,'e'],KeyC:[67,'c'],KeyA:[65,'a'],KeyS:[83,'s'],KeyD:[68,'d'],Space:[32,' '],KeyJ:[74,'j'],Escape:[27,'Escape'],Tab:[9,'Tab'],Digit1:[49,'1'],Digit2:[50,'2'],Digit3:[51,'3']};
 const held=new Set();
 // Hardware keyboard fallback remains available; touch buttons use native synced
@@ -203,7 +231,9 @@ function bridge(){return window.Module||null}
 function nativeReady(){const m=bridge();return !!(m&&typeof m._DukeX_SetTouchAxes==='function'&&typeof m._DukeX_SetAimAxes==='function')}
 function joystickEnabled(){
  const m=bridge();
- return !!m && !document.hidden && !root.classList.contains('dx-overlay-open') &&
+ return !!m && root.classList.contains('dx-v19-touch') && root.classList.contains('dx-in-game') &&
+   !document.hidden && !root.classList.contains('dx-overlay-open') &&
+   (callNumber('DukeX_V46PremapActive')===0) &&
    !root.classList.contains('dx-player-dead') &&
    typeof m._DukeX_SetTouchAxes==='function' && typeof m._DukeX_SetAimAxes==='function';
 }
@@ -236,6 +266,8 @@ function resetMobileInput(){releaseOne('move',null);releaseOne('aim',null);
  axis('move',0,0);axis('aim',0,0);
  pressedTouchKeys.clear();applyTouchButtons();for(const k of [...held])hold(k,false);
 }
+// V46.1: native pre-map screens can immediately clear any held move/look state.
+window.DX46_ResetTouchInput=resetMobileInput;
 const style27=document.createElement('style');style27.id='dx27-two-stick-style';style27.textContent=`
 #duke-x-controls #dx-move-zone,#duke-x-controls #dx-aim-zone,
 #duke-x-controls #dx-move-pad,#duke-x-controls #dx-aim-pad,#dx22-traverse{display:none!important;pointer-events:none!important}
@@ -330,7 +362,7 @@ setInterval(()=>{
   j.node.classList.toggle('dx27-disconnected',!connected);
   if(!connected)j.readout.textContent='NATIVE OFF';
  }
- // Controls never disappear. Only death/modal releases a held stick.
+ // Controls are completely hidden outside active gameplay, not merely faded.
  if(!ok&&(axes.move.pid!==null||axes.aim.pid!==null))resetMobileInput();
  nativeAxes();
  const m=bridge();if(m&&typeof m._DukeX_ProbeTouchSamples==='function'){
@@ -366,11 +398,16 @@ function refreshMenu(){
  if(selectedTab==='operations')notify(`TOKENS ${callNumber('DukeX_CareerCredits')} • META RANK ${callNumber('DukeX_CareerRank')} • Next ${20*(1+callNumber('DukeX_CareerRank'))} tokens`);
 }
 function redrawArmory(){const list=root.querySelector('#dx-armory-list');list.replaceChildren();let found=0;
- const n=callNumber('DukeX_ItemCount');for(let id=0;id<n&&id<96;id++){
+ const n=callNumber('DukeX_ItemCount');for(let id=0;id<n&&id<170;id++){
   const rank=callNumber('DukeX_ItemRank',[id]);if(rank===0)continue;
   const item=document.createElement('div');item.className='dx-inventory-item';
   const title=document.createElement('b');title.textContent=callString('DukeX_ItemName',[id])||`POWER ${id}`;
-  const desc=document.createElement('small');desc.textContent=`${callNumber('DukeX_ItemIsWeapon',[id])?'WEAPON':'PASSIVE'} · RANK ${rank}`;
+  const desc=document.createElement('small');
+  const rarity=callNumber('DukeX_V46ItemRarity',[id]);
+  const absorbed=callNumber('DukeX_V46ItemAbsorbed',[id]);
+  const rarityText=['COMMON','UNCOMMON','RARE','EPIC','LEGENDARY','MYTHIC'];
+  desc.textContent=`${callNumber('DukeX_ItemIsWeapon',[id])?'WEAPON':'PASSIVE'} · RANK ${rank} · ${rarityText[rarity]||'COMMON'} · ${callNumber('DukeX_V46ItemStatPercent',[id])||100}%`+(absorbed?' · FUSED INTO ANOTHER ITEM':'');
+  item.style.borderColor=['#837968','#6ebf9c','#5e94dc','#bd70dd','#ffcb68','#fb6b9a'][rarity]||'#837968';
   item.append(title,desc);list.append(item);found++;
  }
  if(!found){const p=document.createElement('p');p.className='dx-hint';p.textContent='Enter a level and collect XP crystals to build your arsenal.';list.append(p);}
@@ -392,11 +429,9 @@ const starterKey='dukex.starter.v16';let selectedLoadout=0;
 try{selectedLoadout=Math.max(0,Math.min(4,+localStorage.getItem(starterKey)||0));}catch(_){}
 function applyStarter(){const m=window.Module;if(m&&typeof m._DukeX_SelectLoadout==='function')m._DukeX_SelectLoadout(selectedLoadout)}
 function redrawCharacters(){const host=root.querySelector('#dx-character-list');host.replaceChildren();
- for(let i=0;i<5;i++){const b=document.createElement('button');b.className='dx-profile'+(selectedLoadout===i?' selected':'');
- const name=callString('DukeX_LoadoutName',[i])||['DUKE CLASSIC','DEMOLITION EXPERT','CYBER COMMANDO','HAZMAT SPECIALIST','CRYO MARINE'][i];
- b.textContent=`${selectedLoadout===i?'◆ ':'◇ '}${name} — ${loadoutDetails[i]}`;
- b.onclick=()=>{selectedLoadout=i;try{localStorage.setItem(starterKey,String(i))}catch(_){}applyStarter();redrawCharacters()};host.append(b);}
- const p=document.createElement('p');p.className='dx-hint';p.textContent='Selected starter is applied when your NEXT level begins. All other weapons can still be found as upgrades.';host.append(p);
+ const info=document.createElement('p');info.className='dx-hint';
+ info.textContent='Character selection now happens inside the original Duke X engine after choosing New Game difficulty, before map loading. Choose a starter with 1–5 and Enter; on phones/tablets use the character buttons displayed during the native selection screen.';
+ host.append(info);
 }
 root.querySelector('#dx-native-menu').onclick=()=>{openMenu(false);press('Escape')};
 root.querySelector('#dx-show-map').onclick=()=>{openMenu(false);press('Tab')};
@@ -404,6 +439,17 @@ function restartRun(){const result=callNumber('DukeX_RequestRestart');if(result)
 root.querySelector('#dx-respawn').onclick=restartRun;
 root.querySelector('#dx-ops-restart').onclick=restartRun;
 root.querySelector('#dx-career').onclick=()=>{if(callNumber('DukeX_BuyCareerRank')){saveCareer();refreshMenu()}else notify('Not enough tokens, or already at the maximum rank.')};
+const dx46SlotOps=root.querySelector('[data-dx-section="operations"] .dx-actionline');
+if(dx46SlotOps)for(const [kind,type] of [[0,'WEAPON'],[1,'PASSIVE']]){
+ const b=document.createElement('button');b.dataset.dx46Slot=String(kind);dx46SlotOps.append(b);
+ function refresh(){let n=callNumber(kind?'DukeX_V46PassiveSlots':'DukeX_V46WeaponSlots');
+   b.textContent=`UNLOCK ${type} SLOT ${n}/8 · ${(n-3)*45} TOKENS`;
+   b.disabled=n>=8;
+ }
+ b.onclick=()=>{if(callNumber('DukeX_V46BuySlot',[kind])){saveCareer();refresh();notify(type+' capacity increased');}
+   else notify('Not enough credits or already at 8 slots');};refresh();
+}
+
 for(const b of root.querySelectorAll('[data-dx-debug]'))b.onclick=()=>{
  document.body.classList.toggle('dx-show-debug-log',b.dataset.dxDebug==='log');
  document.body.classList.toggle('dx-show-debug-video',b.dataset.dxDebug==='video');openMenu(false);
@@ -474,9 +520,11 @@ function redrawCards(pending){root.querySelector('#dx-level-sub').textContent=`$
  for(const b of root.querySelectorAll('[data-dx-pick]')){
   const i=+b.dataset.dxPick,name=callString('DukeX_OfferName',[i]),desc=callString('DukeX_OfferDescription',[i]);
   const rank=callNumber('DukeX_OfferRank',[i]),tile=callNumber('DukeX_OfferIcon',[i]),evo=callNumber('DukeX_OfferEvolution',[i]);
+  const rarity=callNumber('DukeX_V46OfferRarity',[i]),rarityText=['COMMON','UNCOMMON','RARE','EPIC','LEGENDARY','MYTHIC'];
   b.querySelector('.dx-power').textContent=name||'SUPPLY DROP';b.querySelector('.dx-desc').textContent=desc||'LEVEL UP YOUR ARSENAL';
   b.querySelector('.dx-type').textContent=`${callNumber('DukeX_OfferIsWeapon',[i])?'WEAPON':'PASSIVE'} · ${rank===0?'NEW':'UPGRADE'}`;
-  b.querySelector('.dx-tier').textContent=`${i} · RANK ${rank+1}`;
+  b.querySelector('.dx-tier').textContent=`${rarityText[rarity]||'COMMON'} · RANK ${rank+1}`;
+  b.style.borderColor=['#857c6c','#56be9f','#72a9ec','#b578f2','#eec46c','#ff699d'][rarity]||'#857c6c';
   b.querySelector('.dx-evo').textContent=evo?'EVOLUTION / FUSION READY':'';
   const icon=b.querySelector('.dx-icon');let im=icon.querySelector('img');
   if(art.has(tile)){if(!im){icon.replaceChildren();im=document.createElement('img');im.alt='Original Duke ART';icon.append(im)}if(im.src!==art.get(tile))im.src=art.get(tile);}
@@ -501,15 +549,19 @@ root.querySelector('#dx-reroll').onclick=()=>{if(callNumber('DukeX_RerollOffers'
 root.querySelector('#dx-banish-toggle').onclick=()=>{banishMode=!banishMode;redrawCards(callNumber('DukeX_PendingUpgrades'))};
 window.addEventListener('keydown',e=>{if(mask.style.display==='flex'&&/^Digit[123]$/.test(e.code)){e.preventDefault();const card=root.querySelector('[data-dx-pick=\"'+e.code.slice(-1)+'\"]');if(card)card.click();}},{capture:true});
 const META_KEY='dukex.career.v1';let careerRestored=false;
-function saveCareer(){if(!careerRestored)return;try{localStorage.setItem(META_KEY,JSON.stringify({v:1,credits:callNumber('DukeX_CareerCredits'),rank:callNumber('DukeX_CareerRank')}))}catch(_){}}
+function saveCareer(){if(!careerRestored)return;try{localStorage.setItem(META_KEY,JSON.stringify({v:1,credits:callNumber('DukeX_CareerCredits'),rank:callNumber('DukeX_CareerRank'),weaponSlots:callNumber('DukeX_V46WeaponSlots'),passiveSlots:callNumber('DukeX_V46PassiveSlots')}))}catch(_){}}
 const startup=setInterval(()=>{const m=window.Module;if(!m||typeof m._DukeX_SelectLoadout!=='function')return;
- clearInterval(startup);applyStarter();careerRestored=true;
- try{const c=JSON.parse(localStorage.getItem(META_KEY)||'null');if(c?.v===1&&typeof m._DukeX_LoadCareer==='function')m._DukeX_LoadCareer(c.credits|0,c.rank|0)}catch(_){}
+ clearInterval(startup);careerRestored=true;
+ try{const c=JSON.parse(localStorage.getItem(META_KEY)||'null');if(c?.v===1&&typeof m._DukeX_LoadCareer==='function'){
+     m._DukeX_LoadCareer(c.credits|0,c.rank|0);
+     if(typeof m._DukeX_V46LoadSlots==='function')m._DukeX_V46LoadSlots(c.weaponSlots||4,c.passiveSlots||4);
+   }}catch(_){}
 },90);
 setInterval(saveCareer,4500);window.addEventListener('pagehide',saveCareer);
 setInterval(()=>{
  const gm=callNumber('DukeX_ProbeGameMode'),gmAvailable=!!window.Module&&typeof window.Module._DukeX_ProbeGameMode==='function',
- inGame=gmAvailable?(gm&4)!==0:!!(window.Module&&typeof window.Module._DukeX_SetTouchAxes==='function');
+ inGame=gmAvailable?((gm&4)!==0 && (gm&1)===0 && (gm&8)===0 &&
+   callNumber('DukeX_V46PremapActive')===0):false;
  const dead=callNumber('DukeX_ProbeDeathState')===1;
  const generation=callNumber('DukeX_ProbeRunGeneration');
  if(generation!==prevRunGeneration || dead!==prevDead || inGame!==prevGameplay){

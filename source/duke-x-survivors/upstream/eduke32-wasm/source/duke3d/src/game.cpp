@@ -7826,13 +7826,14 @@ int G_DoMoveThings(void)
         if (sprite[g_player[i].ps->i].pal != 1)
             sprite[g_player[i].ps->i].pal = g_player[i].pcolor;
 
-        P_HandleSharedKeys(i);
+        if (!DukeX::ModalPauseActive()) P_HandleSharedKeys(i);
 #if defined(__EMSCRIPTEN__) || defined(NETNATIVE)
         Net_ApplyGuestWeapon(i);   // host: fire the weapon the guest reported, not the one we reconstructed
         Net_ApplyGuestPos(i);      // host: adopt the position the guest reported (client owns its movement)
 #endif
 
-        if (ud.pause_on == 0)
+        // DXV48_MODAL_GAME_INPUT_GATE: chest/upgrade choices suspend actor input.
+        if (ud.pause_on == 0 && !DukeX::ModalPauseActive())
         {
             DukeX::BeforeInput(i); // survivor automation in original input
             P_ProcessInput(i);

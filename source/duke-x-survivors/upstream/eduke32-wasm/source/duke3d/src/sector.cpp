@@ -2593,9 +2593,15 @@ void A_DamageObject_Generic(int spriteNum, int const dmgSrc)
     }
 }
 
+#ifdef __EMSCRIPTEN__
+extern "C" int DukeX_V46DamageChest(int victim,int source);
+#endif
 void A_DamageObject(int spriteNum, int const dmgSrc)
 {
     ud.returnvar[0] = -1;
+#ifdef __EMSCRIPTEN__
+    if (DukeX_V46DamageChest(spriteNum,dmgSrc)) return;
+#endif
 
 #ifndef EDUKE32_STANDALONE
     if (!FURY)

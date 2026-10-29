@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <climits>
+#include "dukex_v46_progression.h"
 // DXV29_PORTABLE_NATIVE: Emscripten only decorates exported functions.
 // The real gameplay and HUD compile on non-browser EDuke32 builds too.
 #ifndef EMSCRIPTEN_KEEPALIVE
@@ -83,6 +84,12 @@ constexpr int kLoadoutCount=5;
 constexpr int kArsenalStart=70, kArsenalWeapons=50, kArsenalPassives=50;
 
 constexpr int kGemLimit=288;
+// DXV48: magnet and vacuum are native, frame-bounded simulation rules.
+constexpr int kXPBaseMagnetRadius=1720;  // +23% from V47 default 1400
+constexpr int kXPMagnetRankRadius=900;
+constexpr int kVacuumDurationTicks=kHz*18;
+constexpr int kVacuumMaxStep=14000;
+constexpr int kVacuumCollectRadius=420;
 constexpr int kDeathQueueLimit=256;
 constexpr int kMaxSpawnsPerBurst=24;
 constexpr int kTargetRadius=22000;
@@ -160,8 +167,21 @@ struct Fighter {
     int earnedCredits=0;
     int rerolls=2, banishes=1;
     uint8_t banished[kSkillCount]={};
+    uint8_t rarity[kSkillCount]={};       // item-bound tier, 0..5
+    uint8_t absorbed[kSkillCount]={};     // fusion component remains active but stops occupying its slot
+    uint8_t fused[kSkillCount]={};        // permanently upgraded merged attack family
+    uint16_t fusionPartner[kSkillCount]={}; // generic recipe link: partner item id + 1
+    uint8_t statRoll[kSkillCount]={};     // reproducible 0..8 stat modifier
 };
-static int EquippedWeapons(Fighter const& f){int count=0;for(int n=0;n<kSkillCount;++n)if(IsWeaponSkill(n)&&f.skill[n]>0)++count;return count;}
+static int careerWeaponSlots=4,careerPassiveSlots=4;
+static int OccupiedSlots(Fighter const& f,bool weapons){
+    return DukeXV46::CountSlots(f.skill,f.absorbed,IsWeaponSkill,weapons);
+}
+static bool CanOfferSkill(Fighter const& f,int id){
+    return id>=0 && id<kSkillCount && DukeXV46::CanAcquire(id,f.skill,f.banished,
+        f.absorbed,MaxRank(id),careerWeaponSlots,careerPassiveSlots,IsWeaponSkill);
+}
+static int EquippedWeapons(Fighter const& f){return OccupiedSlots(f,true);}
 struct Gem {int id=-1,value=0,age=0,tile=-1;int vz=0;int bounces=0;};
 struct Drop {int x=0,y=0,z=0,sectorId=-1,value=1;};
 static Fighter fighters[MAXPLAYERS];
@@ -170,6 +190,30 @@ static Gem gems[kGemLimit];
 // independent of the three-card level-up flow.
 struct Cache { int id=-1;int age=0,tile=-1,kind=0,vz=0;}; // 0: upgrade, 1: health, 2: armor, 3: fuel, 4: medkit
 static Cache caches[32];
+// A timed, player-owned world pickup. Unlike ordinary magnetization, this
+// crosses doors/portals to collect all remaining native XP gems in a level.
+struct XPVacuum {int seat=-1, ticks=0, collected=0, triggerCount=0;};
+static XPVacuum xpVacuum;
+static int xpVacuumDrops=0;
+// A real engine-owned chest presentation. World simulation pauses for solo
+// reveal, but HUD ticks still animate it using native Build sprite drawing.
+struct ChestReveal {
+    int seat=-1,frames=0,count=0,spins=0,icon=TRASH;
+    int reward[5]={-1,-1,-1,-1,-1};
+    uint8_t rarity[5]={};
+    bool fusion[5]={};
+};
+static ChestReveal chestReveal;
+static int chestsSpawned=0,chestsOpened=0,chestFusions=0;
+static int lastBoon=-1,lastBoonStrength=0,lastBoonUntil=0;
+static uint8_t activeBoons[8]={},activeBanes[8]={};
+// A super-rare standalone three-choice run mutation, separate from inventory.
+struct TwistChoice {int seat=-1,frames=0;DukeXV46::RunTwist cards[3]{};};
+static TwistChoice twistChoice;
+static const char *const twistNames[8]={
+    "RAT SWARM", "XP WINDFALL", "BLOOD PRICE", "BOSS UPRISING",
+    "CHEST FEVER", "CRIT FRENZY", "MAGNET STORM", "WILD SURGE"
+};
 static int lastCacheAward=-1, cacheBannerUntil=0;
 static Drop drops[kDeathQueueLimit];
 static int dropRead=0,dropWrite=0;
@@ -198,6 +242,7 @@ static int restartRequested=0;
 static int offerGeneration=0;
 static uint32_t offerSeed=0;
 static int activeOffer[3]={-1,-1,-1};
+static uint8_t activeOfferRarity[3]={};
 static bool offerReady=false;
 static uint32_t offerNonce=0;
 static uint16_t offerSeen[170]={};
@@ -237,6 +282,14 @@ enum NativeBoltKind { NB_NEXUS=0, NB_PRISM=1, NB_RECALL=2, NB_COMET=3 };
 struct NativeBolt {int id=-1,seat=-1,kind=0,rank=0,life=0,age=0,angle=0,
     speed=0,vertical=0,target=-1,hitCooldown=0,originalTile=-1;};
 static NativeBolt bolts[80];
+// V47: real guided/spiral missiles. Fixed pool, native sprites and Build
+// collision. Independent of A_Shoot's CON paths and visually reproducible.
+struct V47Missile {int id=-1,seat=-1,kind=0,rank=1,life=0,angle=0,
+                         age=0,phase=0,speed=0,originalTile=-1,target=-1;};
+static V47Missile v47Missiles[64];
+static int v47MissilesLaunched=0,v47MissilesImpacted=0;
+static int v47ShotgunContacts=0,v47RailGuaranteed=0,v47TransformerReactions=0;
+
 static int nativeBoltHits=0, nativeBoltCollisions=0, nativeBoltsFired=0;
 // DXV35: solo play is hands-free by default. The player may explicitly disable it.
 static int autoMode=1;
@@ -291,6 +344,8 @@ static NapalmField napalmFields[12];
 static uint8_t enemyObserved[MAXSPRITES]={}, enemyDropSeen[MAXSPRITES]={};
 static int enemyAggroX[MAXSPRITES]={},enemyAggroY[MAXSPRITES]={};
 static uint8_t enemyIdleScore[MAXSPRITES]={};
+static uint8_t enemyWakeAttempts[MAXSPRITES]={};
+static uint8_t enemyDamageVetoStreak[MAXSPRITES]={};
 static int nativeAggroWakes=0;
 static Drop enemyLastSeen[MAXSPRITES];
 // PCG32: reproducible world simulation; no global C rand() or modulo-biased draws.
@@ -317,6 +372,13 @@ static constexpr int kV39ArtBase=12800;
 static int V39Art(int ability){
     int const tile=kV39ArtBase+ability-70;
     return ability>=70 && ability<170 && HasArt(tile)?tile:TRANSPORTERSTAR;
+}
+// V47 sprites are original Build ART (transparent index 255), not TRASH
+// decorations whose background pixels can become opaque when pal-cycled.
+static constexpr int kV47ArtBase=13056;
+static int V47Art(int index,int fallback=TRANSPORTERSTAR){
+    const int t=kV47ArtBase+index;
+    return index>=0 && index<13 && HasArt(t)?t:fallback;
 }
 static int ArtRepeat(int tile,int intendedPixels=36){
     int dim=16;
@@ -407,12 +469,26 @@ static bool Alive(int seat){
     return p->i>=0 && p->i<MAXSPRITES && p->cursectnum>=0 &&
            (p->gm & MODE_GAME) && sprite[p->i].extra>0;
 }
+// Stop input AND world simulation during full-screen native modal sequences.
+// Never pause multiplayer peers; the renderer/HUD continues to animate.
+static bool ModalPauseActive(){
+    return numplayers==1 && initialized && Alive(myconnectindex) &&
+           (chestReveal.seat>=0 || twistChoice.seat>=0 ||
+            (!autoMode && fighters[myconnectindex].unspent>0));
+}
 static void ArsenalRuntimeReset();
+static void V47MissileReset();
 static void Reset(){
     for(auto &f:fighters)f=Fighter{};
     for(auto &g:gems)g=Gem{};
     for(auto &c:caches)c=Cache{};
+    xpVacuum=XPVacuum{};xpVacuumDrops=0;
     lastCacheAward=-1;cacheBannerUntil=0;
+    chestReveal=ChestReveal{};chestsSpawned=chestsOpened=chestFusions=0;
+    lastBoon=-1;lastBoonStrength=lastBoonUntil=0;
+    std::memset(activeBoons,0,sizeof(activeBoons));
+    twistChoice=TwistChoice{};
+    std::memset(activeBanes,0,sizeof(activeBanes));
     dropRead=dropWrite=0;gameTicks=0;wave=1;bossWave=0;spawnDebt=0;
     std::memset(enemyObserved,0,sizeof(enemyObserved));
     std::memset(survivorRat,0,sizeof(survivorRat));
@@ -422,6 +498,8 @@ static void Reset(){
     ratGlobalBiteReady=0;
     std::memset(enemyDropSeen,0,sizeof(enemyDropSeen));
     std::memset(enemyIdleScore,0,sizeof(enemyIdleScore));
+    std::memset(enemyWakeAttempts,0,sizeof(enemyWakeAttempts));
+    std::memset(enemyDamageVetoStreak,0,sizeof(enemyDamageVetoStreak));
     std::memset(enemyAggroX,0,sizeof(enemyAggroX));
     std::memset(enemyAggroY,0,sizeof(enemyAggroY));nativeAggroWakes=0;
     for(auto &d:enemyLastSeen)d=Drop{};
@@ -447,6 +525,7 @@ static void Reset(){
     for(auto &v:visuals)v=Visual{};
     for(auto &b:thrown)b=Thrown{};
     ArsenalRuntimeReset();
+    V47MissileReset();
     for(auto &b:bolts){if(b.id>=0 && b.id<MAXSPRITES && sprite[b.id].statnum==STAT_FX && sprite[b.id].picnum==b.originalTile)A_DeleteSprite(b.id);b=NativeBolt{};}
     nativeBoltHits=nativeBoltCollisions=nativeBoltsFired=0;
     autoBrain=AutoBrain{};autoDecisions=autoAvoidance=autoExplorations=0;
@@ -470,6 +549,7 @@ static void Reset(){
     appliedLoadout=-1;offerGeneration=0;offerReady=false;offerNonce=0;
     std::memset(offerSeen,0,sizeof(offerSeen));
     for(int &id:activeOffer)id=-1;
+    std::memset(activeOfferRarity,0,sizeof(activeOfferRarity));
     activeEnemies=0;rng=0x7e5d0321u;
     // Per-run entropy for solo; fixed repeatable stream for multiplayer until
     // an authoritative shared match seed is negotiated by the net protocol.
@@ -486,6 +566,31 @@ static void Reset(){
         if(!offerSeed)offerSeed=0x42694f6fu;
     }else offerSeed=0x7e5d0321u;
     // Career is deliberately not reset with individual runs.
+}
+// DXV46: one acquisition contract for level-up, cache and chest paths.
+static void AcquireItem(Fighter &f,int id,int rarity=-1){
+    if(id<0 || id>=kSkillCount || f.skill[id]>=MaxRank(id))return;
+    if(f.skill[id]==0){
+        int rolled=rarity>=0?rarity:DukeXV46::RollRarity(RandomBounded(10000),f.skill[18]);
+        f.rarity[id]=static_cast<uint8_t>(Clamp(rolled,0,5));
+        f.statRoll[id]=static_cast<uint8_t>(RandomBounded(9));
+    } else if(rarity>f.rarity[id]) f.rarity[id]=static_cast<uint8_t>(Clamp(rarity,0,5));
+    ++f.skill[id];
+}
+static int ItemPercent(Fighter const& f,int id){
+    if(id<0||id>=kSkillCount || !f.skill[id])return 100;
+    return DukeXV46::StatPercent(f.rarity[id],f.statRoll[id])+(f.fused[id]?16+(int)f.rarity[id]*3:0);
+}
+// Chest fusion keeps both acquired effects valid for legacy combat contracts
+// while absorbing a component into the evolved item and freeing its slot.
+static bool TryFuse(Fighter &f,int first,int second){
+    if(first<0||first>=kSkillCount||second<0||second>=kSkillCount || first==second ||
+       f.fused[first] || f.absorbed[first] || f.absorbed[second] ||
+       f.skill[first]<2 || f.skill[second]<2)return false;
+    f.fused[first]=1;f.fusionPartner[first]=(uint16_t)(second+1);f.absorbed[second]=1;
+    f.rarity[first]=static_cast<uint8_t>(Min(5,(int)f.rarity[first]+1));
+    ++chestFusions;
+    return true;
 }
 // DXV28: Roll exactly WHEN the browser opens a power choice, not when XP
 // crosses its threshold. Polling offers never advances the RNG. One roll
@@ -514,10 +619,10 @@ static void RollOffers(Fighter const& f){
     } else offerSeed=OfferHash(offerSeed+offerNonce*0x85ebca6bu);
     uint32_t state=offerSeed?offerSeed:0xbedac0deu;
     for(int card=0;card<3;++card){
-        activeOffer[card]=-1;
+        activeOffer[card]=-1;activeOfferRarity[card]=0;
         int weightTotal=0;
         for(int id=0;id<kSkillCount;++id){
-            if(f.banished[id] || f.skill[id]>=MaxRank(id))continue;
+            if(!CanOfferSkill(f,id))continue;
             bool used=false;for(int j=0;j<card;++j)if(activeOffer[j]==id)used=true;
             if(used)continue;
             int weight=IsWeaponSkill(id)?38:80;
@@ -530,7 +635,7 @@ static void RollOffers(Fighter const& f){
         if(!weightTotal)continue;
         int ticket=static_cast<int>(NextOfferBounded(state,static_cast<uint32_t>(weightTotal)));
         for(int id=0;id<kSkillCount;++id){
-            if(f.banished[id] || f.skill[id]>=MaxRank(id))continue;
+            if(!CanOfferSkill(f,id))continue;
             bool used=false;for(int j=0;j<card;++j)if(activeOffer[j]==id)used=true;
             if(used)continue;
             int weight=IsWeaponSkill(id)?38:80;
@@ -539,7 +644,12 @@ static void RollOffers(Fighter const& f){
             weight=Max(1,weight*4/(4+Min(40,offerSeen[id])));
             if(IsWeaponSkill(id))weight+=f.skill[18]*17;
             ticket-=Max(1,weight);
-            if(ticket<0){activeOffer[card]=id;break;}
+            if(ticket<0){
+                activeOffer[card]=id;
+                activeOfferRarity[card]=static_cast<uint8_t>(DukeXV46::RollRarity(
+                    NextOfferBounded(state,10000),f.skill[18]));
+                break;
+            }
         }
     }
     for(int card=0;card<3;++card){
@@ -553,7 +663,8 @@ static int Choice(Fighter const&,int index){
     return activeOffer[index];
 }
 static bool BeginOffer(int seat){
-    if(numplayers!=1 || !initialized || !Alive(seat) || fighters[seat].unspent<=0)return false;
+    if(numplayers!=1 || !initialized || !Alive(seat) ||
+       chestReveal.seat>=0 || fighters[seat].unspent<=0)return false;
     if(!offerReady)RollOffers(fighters[seat]);
     return true;
 }
@@ -566,11 +677,11 @@ static void ApplyLoadout(int seat){
     // Each character starts with a DISTINCT weapon family. Satellite/radiation
     // weapons require explicitly choosing that starter or a level-up card.
     switch(id){
-      case 1:f.skill[ROCKET]=1;f.skill[MINES]=1;break;
-      case 2:f.skill[LASER]=1;f.skill[SEEKERS]=1;break;
-      case 3:f.skill[RADIATION]=1;f.skill[14]=1;break;
-      case 4:f.skill[FREEZE]=1;f.skill[CRYO_SHATTER]=1;break;
-      default:f.skill[PISTOL]=1;break;
+      case 1:AcquireItem(f,ROCKET,1);AcquireItem(f,MINES,0);break;
+      case 2:AcquireItem(f,LASER,1);AcquireItem(f,SEEKERS,0);break;
+      case 3:AcquireItem(f,RADIATION,1);AcquireItem(f,14,0);break;
+      case 4:AcquireItem(f,FREEZE,1);AcquireItem(f,CRYO_SHATTER,0);break;
+      default:AcquireItem(f,PISTOL,0);break;
     }
 }
 static bool Reroll(int seat){
@@ -650,6 +761,10 @@ static void GrantXP(int seat,int base){
     int amount=base + base*f.skill[13]/5 + base*f.skill[LOOT]/10 + base*f.skill[XP_FEVER]/6 + base*Min(4,f.combo/10) + base*f.skill[RECYCLER]/3 + (numplayers==1?base*careerRank/15:0);
     // V38: XP-related passive modules; all apply to real earned XP, not HUD cosmetics.
     amount+=base*f.skill[138]/4;
+    amount+=base*(int)activeBoons[1]/3; // prosperity boon
+    amount=Max(1,amount-base*(int)activeBanes[1]/5); // famine bane
+    amount+=base*(int)activeBoons[7]/7;
+    amount=Max(1,amount-base*(int)activeBanes[7]/8);
     f.xp+=Max(1,amount);
     while(f.level<kMaxLevel && f.xp>=f.threshold){
         f.xp-=f.threshold;
@@ -662,11 +777,11 @@ static bool ChooseUpgrade(int seat,int choice){
     Fighter &f=fighters[seat];
     if(f.unspent<=0 || !offerReady)return false;
     int id=Choice(f,choice-1);
-    if(id<0 || f.skill[id]>=MaxRank(id)){
+    if(id<0 || !CanOfferSkill(f,id)){
         // Maxed choices convert to guaranteed survivability; no lost levels.
         auto &hp=sprite[g_player[seat].ps->i].extra;
         hp=Min(250,hp+15);
-    } else ++f.skill[id];
+    } else AcquireItem(f,id,activeOfferRarity[choice-1]);
     --f.unspent;
     offerReady=false;for(int &card:activeOffer)card=-1;
     return true;
@@ -700,6 +815,7 @@ static bool TakeRestartRequest(){
 }
 static bool HasPendingUpgrade(){
     SyncRunState();
+    if((chestReveal.seat>=0 || twistChoice.seat>=0) && numplayers==1)return true;
     if(autoMode && numplayers==1 && initialized && Alive(myconnectindex) &&
        fighters[myconnectindex].unspent>0){
         if(BeginOffer(myconnectindex)){
@@ -1065,26 +1181,372 @@ static void SpawnSupply(int seat,int kind=0){
     sprite[id].pal=8;sprite[id].shade=-30;
     caches[free].id=id;caches[free].age=0;caches[free].tile=tile;caches[free].kind=kind;
 }
+// V46 boss and elite trash-can chests: native Build sprites, no HTML fake.
+static bool SpawnChestAt(Drop const& death){
+    if(!OwnWorld() || death.sectorId<0 || death.sectorId>=numsectors)return false;
+    Cache *free=nullptr;
+    for(auto &c:caches)if(c.id<0){free=&c;break;}
+    if(!free)return false;
+    const int tile=V47Art(0,EditionTile(CANWITHSOMETHING,TRASH));
+    int id=A_InsertSprite((int16_t)death.sectorId,death.x,death.y,death.z-(4<<8),
+        tile,-12,ArtRepeat(tile,54),ArtRepeat(tile,54),0,0,0,-1,STAT_FX);
+    if(id<0)return false;
+    sprite[id].pal=0;sprite[id].shade=-24;
+    sprite[id].cstat |= 256; // CSTAT_SPRITE_BLOCK_HITSCAN: chest can be shot without blocking passage
+    free->id=id;free->age=0;free->tile=tile;free->kind=5;free->vz=0;
+    ++chestsSpawned;return true;
+}
+// DXV48: Rare world collectible, always distinct from a chest (kind 5).
+// The original Duke crystal sprite and palette are used; no purchased assets.
+static bool SpawnXPVacuum(Drop const& at){
+    if(numplayers!=1 || !OwnWorld() || at.sectorId<0 || at.sectorId>=numsectors)return false;
+    Cache* free=nullptr;
+    for(auto& c:caches)if(c.id<0){free=&c;break;}
+    if(!free)return false;
+    const int tile=GemTile();
+    const int id=A_InsertSprite((int16_t)at.sectorId,at.x,at.y,at.z-(5<<8),
+                               tile,-28,ArtRepeat(tile,38),ArtRepeat(tile,38),
+                               0,0,0,-1,STAT_FX);
+    if(id<0)return false;
+    sprite[id].cstat=0;
+    sprite[id].pal=7;
+    sprite[id].shade=-30;
+    free->id=id;free->age=0;free->tile=tile;free->kind=6;free->vz=0;
+    ++xpVacuumDrops;
+    return true;
+}
+static bool BeginXPVacuum(int seat){
+    if(numplayers!=1 || !OwnWorld() || !Alive(seat))return false;
+    xpVacuum.seat=seat;
+    xpVacuum.ticks=kVacuumDurationTicks;
+    xpVacuum.collected=0;
+    ++xpVacuum.triggerCount;
+    return true;
+}
+static int XPClampStep(int64_t d,int divisor,int limit){
+    // 64-bit intermediate protects distant sectors from integer overflow.
+    int64_t scaled=(int64_t)d/divisor;
+    if(scaled>limit)scaled=limit;
+    if(scaled<-limit)scaled=-limit;
+    return (int)scaled;
+}
+static int ChestFusionRecipe(Fighter const& f,uint32_t draw){
+    const int a=(int)(sizeof(evolutions)/sizeof(evolutions[0]));
+    const int b=(int)(sizeof(v39Fusions)/sizeof(v39Fusions[0]));
+    int valid[64]={},count=0;
+    for(int k=0;k<a+b && count<64;++k){
+        auto const& recipe=k<a?evolutions[k]:v39Fusions[k-a];
+        const int weapon=recipe.weapon,other=recipe.passive;
+        if(weapon<0 || weapon>=kSkillCount || other<0 || other>=kSkillCount)continue;
+        if(f.skill[weapon]<3 || f.skill[other]<2 || f.fused[weapon] ||
+           f.absorbed[other] || f.absorbed[weapon])continue;
+        valid[count++]=k;
+    }
+    return count?valid[draw%(unsigned)count]:-1;
+}
+// When no named recipe is available, ANY two acquired non-absorbed items
+// can link via this deterministic hybrid mechanism (weapon, passive or perk).
+// Authored named fusions retain priority and their old special behaviors.
+static constexpr int kHybridFusionBase=2048;
+static int GenericFusionPair(Fighter const& f,uint32_t draw){
+    int first[kSkillCount]={},n=0;
+    for(int i=0;i<kSkillCount;++i)if(f.skill[i]>=2 && !f.fused[i] && !f.absorbed[i])
+        first[n++]=i;
+    if(n<2)return -1;
+    int a=(int)(draw%(uint32_t)n),b=(a+1+(int)((draw>>16)%(uint32_t)(n-1)))%n;
+    return kHybridFusionBase+first[a]*kSkillCount+first[b];
+}
+static void StartChestReveal(int seat){
+    if(!Alive(seat) || chestReveal.seat>=0)return;
+    Fighter &f=fighters[seat];
+    Fighter preview=f; // reserve capacity as we roll; never silently discard a jackpot slot
+    chestReveal=ChestReveal{};
+    chestReveal.seat=seat;
+    chestReveal.icon=V47Art(0,EditionTile(CANWITHSOMETHING,TRASH));
+    chestReveal.count=DukeXV46::ChestRewardCount(RandomBounded(10000),1);
+    bool chosen[kSkillCount]={};
+    for(int j=0;j<chestReveal.count;++j){
+        int recipe=(RandomBounded(100)<46)?ChestFusionRecipe(preview,Random()):-1;
+        if(recipe<0 && RandomBounded(100)<22)recipe=GenericFusionPair(preview,Random());
+        if(recipe>=kHybridFusionBase){
+            int primary=(recipe-kHybridFusionBase)/kSkillCount;
+            if(!chosen[primary]){
+                chestReveal.reward[j]=recipe;chestReveal.fusion[j]=true;
+                chestReveal.rarity[j]=(uint8_t)Min(5,(int)f.rarity[primary]+1);
+                chosen[primary]=true;
+                int partner=(recipe-kHybridFusionBase)%kSkillCount;
+                preview.fused[primary]=1;preview.absorbed[partner]=1;
+                continue;
+            }
+        }
+        if(recipe>=0 && recipe<kHybridFusionBase){
+            const int base=(int)(sizeof(evolutions)/sizeof(evolutions[0]));
+            auto const& e=recipe<base?evolutions[recipe]:v39Fusions[recipe-base];
+            if(!chosen[e.weapon]){
+                chestReveal.reward[j]=recipe;
+                chestReveal.fusion[j]=true;
+                chestReveal.rarity[j]=(uint8_t)Min(5,(int)f.rarity[e.weapon]+1);
+                chosen[e.weapon]=true;
+                preview.fused[e.weapon]=1;preview.absorbed[e.passive]=1;
+                continue;
+            }
+        }
+        int options[kSkillCount],total=0;
+        for(int id=0;id<kSkillCount;++id)
+            if(!chosen[id] && CanOfferSkill(preview,id))options[total++]=id;
+        if(!total){chestReveal.count=j;break;}
+        int id=options[RandomBounded((uint32_t)total)];
+        chestReveal.reward[j]=id;
+        chestReveal.rarity[j]=(uint8_t)DukeXV46::RollRarity(RandomBounded(10000),f.skill[18]+2);
+        chosen[id]=true;
+        preview.skill[id]=Min(MaxRank(id),preview.skill[id]+1);
+    }
+    ++chestsOpened;
+}
+static void FinishChestReveal(){
+    int seat=chestReveal.seat;
+    if(!Alive(seat)){chestReveal=ChestReveal{};return;}
+    Fighter &f=fighters[seat];
+    int const fusionBase=(int)(sizeof(evolutions)/sizeof(evolutions[0]));
+    for(int j=0;j<chestReveal.count;++j){
+        int id=chestReveal.reward[j];if(id<0)continue;
+        if(chestReveal.fusion[j]){
+            if(id>=kHybridFusionBase){
+                int primary=(id-kHybridFusionBase)/kSkillCount;
+                int partner=(id-kHybridFusionBase)%kSkillCount;
+                if(TryFuse(f,primary,partner))lastCacheAward=primary;
+            }else{
+                auto const& recipe=id<fusionBase?evolutions[id]:v39Fusions[id-fusionBase];
+                if(TryFuse(f,recipe.weapon,recipe.passive))lastCacheAward=recipe.weapon;
+            }
+        }else if(CanOfferSkill(f,id)){
+            AcquireItem(f,id,chestReveal.rarity[j]);lastCacheAward=id;
+        }
+    }
+    // Super-rare independent choice, not silently awarded or hidden in the
+    // ordinary 170-item armory. The player can choose any of three tradeoffs.
+    if(RandomBounded(10000)<140 && numplayers==1){
+        twistChoice=TwistChoice{};twistChoice.seat=seat;
+        for(int i=0;i<3;++i){
+            auto t=DukeXV46::RollTwist(Random(),Random());
+            // Ensure distinct types; make at least one boon available.
+            if(i==0)t.bane=false;
+            for(int j=0;j<i;++j)if(t.kind==twistChoice.cards[j].kind)
+                t.kind=(t.kind+i+j+1)&7;
+            twistChoice.cards[i]=t;
+        }
+    }
+    cacheBannerUntil=gameTicks+5*kHz;
+    chestReveal=ChestReveal{};
+}
+static bool ChooseTwist(int n){
+    if(n<1||n>3||twistChoice.seat<0)return false;
+    auto const t=twistChoice.cards[n-1];
+    uint8_t &rank=t.bane?activeBanes[t.kind]:activeBoons[t.kind];
+    rank=(uint8_t)Min(9,(int)rank+t.strength);
+    lastBoon=t.kind+(t.bane?8:0);lastBoonStrength=t.strength;
+    lastBoonUntil=gameTicks+kHz*13;
+    twistChoice=TwistChoice{};return true;
+}
+static void DrawTwistSelection(){
+    if(twistChoice.seat<0)return;
+    rotatesprite_fs(160<<16,98<<16,90000L,(twistChoice.frames*8)&2047,
+                    EditionTile(CANWITHSOMETHING,TRASH),-30,((twistChoice.frames/5)%7),2|8|64);
+    printext256(67,39,14,0,"RARE RUN MUTATION!",1);
+    printext256(40,53,15,0,"CHOOSE YOUR BOON OR BANE",1);
+    for(int i=0;i<3;++i){
+        auto const t=twistChoice.cards[i];
+        char msg[100];std::snprintf(msg,sizeof(msg),"%d  %s: %s  x%d",i+1,
+            t.bane?"BANE":"BOON",twistNames[t.kind],t.strength);
+        printext256(45,132+i*16,t.bane?2:14,0,msg,1);
+    }
+    ++twistChoice.frames;
+    // On mobile, touch buttons call the native ChooseTwist export; for desktop
+    // keyboard choices are handled by engine-level upgrade key dispatch.
+    if(twistChoice.frames>kHz*25)ChooseTwist(1);
+}
+// DXV47_JACKPOT: a native Build HUD reveal, deliberately independent from
+// Emscripten DOM. Own masked indexed ART, paused simulation, bounded visual
+// sprites and deterministic animation positions. No extra world sprite pool.
+static void ChestArt(int x,int y,int scale,int angle,int art,int shade=0,int pal=0){
+    const int tile=V47Art(art);
+    rotatesprite_fs(x<<16,y<<16,scale,angle&2047,tile,shade,pal,2|8|64);
+}
+static int ChestIconFor(int reward,bool fusion){
+    if(fusion)return V47Art(6);
+    if(reward>=70 && reward<170)return V39Art(reward);
+    switch(reward){
+      case PISTOL:case SHOTGUN: return SHOTSPARK1;
+      case ROCKET:case DEVASTATOR:case ROCKET_CYCLONE:return RPG;
+      case FREEZE:case CRYO_SHATTER:return FREEZEBLAST;
+      case SHRINK:case SHRINK_SWARM:return SHRINKSPARK;
+      case LASER:case RAILGUN:case PIERCING_RAILS:return FIRELASER;
+      default:return GemTile();
+    }
+}
+static void DrawChestReveal(){
+    if(chestReveal.seat<0)return;
+    const int tick=++chestReveal.frames;
+    const int count=Clamp(chestReveal.count,0,5);
+    // Original translucent full-viewport tile: the level is still visible
+    // behind the dimmer, unlike displaying an opaque menu background.
+    if(HasArt(kV47ArtBase+12))
+        rotatesprite_fs(160<<16,100<<16,65536L,0,V47Art(12),0,0,2|8|64);
+    const int accent=count>=5?14:count>=3?7:15;
+    printext256(60,16,accent,0,"RAT RAID - TRASH JACKPOT",1);
+    printext256(59,29,15,0,"ELITE SALVAGE  //  LOOT REVEAL",1);
+    // 16 original pixel-art sunshafts burst behind an increasingly open can.
+    // Rays are masked pixels, not translucent solid quads or stock TRASH art.
+    const int rays=12;
+    if(tick<198)for(int i=0;i<rays;++i){
+        const int angle=(i*2048/rays+(tick*5))&2047;
+        const int length=Clamp((tick<44?tick*1100:54000)-(i%3)*2000,0,62000);
+        ChestArt(160,86,length,angle,7,-15,0);
+    }
+    if(tick<72){
+        ChestArt(160+(tick%4-2),93,57000+(tick%19)*900,0,0,-9);
+        if(tick>30){
+            ChestArt(159+(tick*4%27)-13,51-(tick-30),32000,(-tick*17)&2047,2,-10);
+            ChestArt(160,73,44000,0,1,-15);
+        }
+    }else{
+        ChestArt(160,84,63000,0,1,-19);
+    }
+    // Rats and flying trash are original 255-masked indexed sprites. They
+    // follow curved ballistic paths, never spinning the prize art itself.
+    if(tick>35 && tick<180){
+        const int age=tick-35;
+        for(int i=0;i<8;++i){
+            const int local=age-i*7;
+            if(local<=0||local>96)continue;
+            const int side=(i&1)?1:-1;
+            const int x=160+side*(12+local*(2+(i%3)))+((sintable[(local*19+i*157)&2047])>>12);
+            const int y=84-(local*(5+(i%3)))/2+(local*local)/25;
+            ChestArt(x,y,24000+(i%3)*3000,(local*13+i*210)&2047,
+                     i%3==0?3+(local/7%2):i%3==1?5:8,-8);
+        }
+    }
+    if(tick>=44 && tick<185){
+        const int progress=Clamp(tick-44,0,135);
+        // Bright but bounded sparks: no heap allocations per frame.
+        for(int i=0;i<10;++i){
+            int a=(i*205+progress*14)&2047;
+            int r=20+(progress*3+i*9)%102;
+            int x=160+(sintable[(a+512)&2047]*r)/16384;
+            int y=86+(sintable[a]*r)/16384;
+            ChestArt(x,y,13000+(i%3)*1800,a,8,-35);
+        }
+    }
+    if(tick<78){
+        printext256(82,166,accent,0,"RATS ARE RAIDING YOUR LOOT!",1);
+    }else{
+        const int showCount=count;
+        // 1-5 actual reward slots; icons cycle with deceleration, then land on
+        // the PRE-ROLLED authoritative native items and reveal their rarity.
+        const int spacing=showCount>=4?54:showCount==3?80:showCount==2?90:0;
+        const int first=160-(showCount-1)*spacing/2;
+        for(int j=0;j<showCount;++j){
+            const bool stopped=tick>=130+j*10;
+            const int id=chestReveal.reward[j];if(id<0)continue;
+            const int reelIndex=(tick/Max(3,13-j*2)+j*23)%kSkillCount;
+            const int icon=ChestIconFor(stopped?id:reelIndex,stopped&&chestReveal.fusion[j]);
+            const int x=first+j*spacing;
+            if(HasArt(kV47ArtBase+11))ChestArt(x,106,39000,0,11,stopped?-28:15);
+            rotatesprite_fs(x<<16,106<<16,23500L,0,icon,stopped?-24:8,0,2|8|64);
+            if(stopped){
+                const int rarity=Clamp(chestReveal.rarity[j],0,5);
+                const int color=rarity>=5?14:rarity==4?7:rarity==3?13:rarity==2?12:15;
+                char label[64];
+                std::snprintf(label,sizeof(label),"%s",rarity==5?"MYTHIC":
+                    rarity==4?"LEGEND":rarity==3?"EPIC":rarity==2?"RARE":
+                    rarity==1?"UNCOMMON":"COMMON");
+                printext256(x-25,129,color,0,label,1);
+            }
+        }
+        if(tick>=185){
+            printext256(47,146,14,0,"JACKPOT! PRIZES ACQUIRED",1);
+            for(int j=0;j<showCount;++j){
+                const int id=chestReveal.reward[j];if(id<0)continue;
+                char label[96];
+                if(chestReveal.fusion[j]){
+                    if(id>=kHybridFusionBase){
+                        const int primary=(id-kHybridFusionBase)/kSkillCount;
+                        const int partner=(id-kHybridFusionBase)%kSkillCount;
+                        std::snprintf(label,sizeof(label),"FUSION: %.27s + %.27s",skillNames[primary],skillNames[partner]);
+                    }else{
+                        const int base=(int)(sizeof(evolutions)/sizeof(evolutions[0]));
+                        const auto& e=id<base?evolutions[id]:v39Fusions[id-base];
+                        std::snprintf(label,sizeof(label),"EVOLVED: %.52s",e.name);
+                    }
+                }else std::snprintf(label,sizeof(label),"%.59s",skillNames[id]);
+                // Clamp to the HUD; the full label is also available in armory.
+                printext256(34,158+j*8,14,0,label,1);
+            }
+        }else printext256(85,165,15,0,"SALVAGE REELS SPINNING...",1);
+    }
+    if(tick>270)FinishChestReveal();
+}
+// Called by A_DamageObject for a projectile/bullet striking a chest sprite.
+// World state and rewards remain authoritative in the native survivor runtime.
+static bool DamageChest(int victim,int dmgSrc){
+    if(!OwnWorld() || victim<0 || victim>=MAXSPRITES || dmgSrc<0 || dmgSrc>=MAXSPRITES)return false;
+    Cache *c=nullptr;
+    for(auto &cache:caches)if(cache.kind==5 && cache.id==victim){c=&cache;break;}
+    if(!c)return false;
+    int seat=-1;
+    for(bssize_t TRAVERSE_CONNECT(i))if(Alive(i)){
+        int owner=g_player[i].ps->i;
+        if(dmgSrc==owner || sprite[dmgSrc].owner==owner ||
+           sprite[dmgSrc].owner==g_player[i].ps->i){seat=i;break;}
+    }
+    if(seat<0) return true; // still suppress original barrel/prop damage handling
+    if(chestReveal.seat<0){StartChestReveal(seat);lastCacheAward=-6;}
+    A_DeleteSprite(victim);*c=Cache{};
+    return true;
+}
 static void ProcessSupplies(){
     if(!OwnWorld())return;
     if(gameTicks%(kHz*35)==0)
         for(bssize_t TRAVERSE_CONNECT(i))if(Alive(i))SpawnSupply(i,1+(RandomBounded(4)));
+    // Long-run insurance: a visible, collectible global vacuum every ~3 min.
+    if(gameTicks>0 && gameTicks%(kHz*180)==0 && numplayers==1)
+        for(bssize_t TRAVERSE_CONNECT(i))if(Alive(i)){
+            const auto& p=sprite[g_player[i].ps->i];
+            Drop at{};at.x=p.x+800;at.y=p.y+500;at.z=p.z;
+            at.sectorId=p.sectnum;SpawnXPVacuum(at);
+        }
     for(auto &c:caches){
         if(c.id<0)continue;
         if(c.id>=MAXSPRITES || sprite[c.id].statnum!=STAT_FX || sprite[c.id].picnum!=c.tile){c=Cache{};continue;}
         auto &item=sprite[c.id];
         StepGroundPhysics(c.id,c.vz,1<<8,145,1400,0);
-        item.xrepeat=item.yrepeat=static_cast<uint8_t>(ArtRepeat(c.tile,42)+(c.age%20<10?3:0));
+        item.xrepeat=item.yrepeat=static_cast<uint8_t>(ArtRepeat(c.tile,c.kind==5?54:42)+(c.age%20<10?3:0));
+        if(c.kind==6){
+            item.pal=7;item.shade=(int8_t)(-32+(c.age%20)/5);
+        }
+        if(c.kind==5){
+            // Never pal-cycle the underlying can! Index 255 is transparent,
+            // but changing the body palette can corrupt its intended pixels.
+            item.pal=0;
+            item.shade=(int8_t)(-30+(c.age%24)/4);
+        }
         if(++c.age>kHz*120){A_DeleteSprite(c.id);c=Cache{};continue;}
         for(bssize_t TRAVERSE_CONNECT(i)){
             if(!Alive(i))continue;
             auto const& p=sprite[g_player[i].ps->i];
             int64_t dx=static_cast<int64_t>(p.x)-item.x,dy=static_cast<int64_t>(p.y)-item.y;
-            int const pickupRadius=500+(c.kind==1?fighters[i].skill[HEALTH_MAGNET]*220:0);
+            int const pickupRadius=Max(280,500+(c.kind==1?fighters[i].skill[HEALTH_MAGNET]*220:0)+(int)activeBoons[6]*180-(int)activeBanes[6]*80);
             if(dx*dx+dy*dy>static_cast<int64_t>(pickupRadius)*pickupRadius || !cansee(item.x,item.y,item.z,item.sectnum,p.x,p.y,p.z,p.sectnum))continue;
             auto &f=fighters[i];
             auto player=g_player[i].ps;
-            if(c.kind==1){
+            if(c.kind==6){
+                BeginXPVacuum(i);
+                lastCacheAward=-7;
+            }else if(c.kind==5){
+                // Either touch or smash (quick kick) opens the same authoritative
+                // jackpot. Destroying the trashcan never deletes its reward.
+                StartChestReveal(i);lastCacheAward=-6;
+            }else if(c.kind==1){
                 auto &hp=sprite[player->i].extra;
                 hp=Min(250,hp+30+f.skill[HEALTH_MAGNET]*8);
                 ++collectedHealth;lastCacheAward=-2;
@@ -1103,8 +1565,8 @@ static void ProcessSupplies(){
                 const int start=static_cast<int>(RandomBounded(kSkillCount));
                 for(int n=0;n<kSkillCount;++n){
                     int skill=(start+n)%kSkillCount;
-                    if(f.skill[skill]>=MaxRank(skill)||f.banished[skill])continue;
-                    ++f.skill[skill];lastCacheAward=skill;break;
+                    if(!CanOfferSkill(f,skill))continue;
+                    AcquireItem(f,skill);lastCacheAward=skill;break;
                 }
             }
             cacheBannerUntil=gameTicks+4*kHz;
@@ -1184,7 +1646,7 @@ static void EnemyAggroWatchdogTick(){
     for(int id=0;id<MAXSPRITES;++id){
         if(IsSurvivorRat(id))continue; // Rats have their own ground AI.
         auto &e=sprite[id];
-        if(e.extra<=0 || e.statnum!=STAT_ACTOR || !IsSurvivorEnemy(id))continue;
+        if(e.extra<=0 || (e.statnum!=STAT_ACTOR && e.statnum!=STAT_ZOMBIEACTOR) || !IsSurvivorEnemy(id))continue;
         if(afflictions[id].kind==EC_FROZEN || afflictions[id].kind==EC_SHOCKED)continue;
         int nearest=-1;int64_t closest=11000LL*11000;
         for(bssize_t TRAVERSE_CONNECT(seat))if(Alive(seat)){
@@ -1199,17 +1661,30 @@ static void EnemyAggroWatchdogTick(){
         const int dx=e.x-enemyAggroX[id],dy=e.y-enemyAggroY[id];
         if((int64_t)dx*dx+(int64_t)dy*dy<175LL*175)
             enemyIdleScore[id]=(uint8_t)Min(12,(int)enemyIdleScore[id]+1);
-        else enemyIdleScore[id]=0;
+        else {enemyIdleScore[id]=0;enemyWakeAttempts[id]=0;}
         enemyAggroX[id]=e.x;enemyAggroY[id]=e.y;
         if(enemyIdleScore[id]<3)continue;
         auto const &p=sprite[g_player[nearest].ps->i];
         e.ang=getangle(p.x-e.x,p.y-e.y);
         actor[id].timetosleep=0;
+        // Original Duke actors can remain in STAT_ZOMBIEACTOR after failed
+        // wake/evasion paths; move the dormant enemy back into the real actor
+        // simulation, while preserving its CON AI/HP and collision contract.
+        if(e.statnum==STAT_ZOMBIEACTOR)changespritestat(id,STAT_ACTOR);
+        // A repeated position stall is not invulnerability. Impulse uses the
+        // authentic collision resolver and will never teleport through walls.
+        enemyWakeAttempts[id]=(uint8_t)Min(8,(int)enemyWakeAttempts[id]+1);
+        if(enemyWakeAttempts[id]>=3){
+            const int16_t ang=e.ang;
+            vec3_t walk{(int)sintable[(ang+512)&2047]/40,
+                        (int)sintable[ang&2047]/40,0};
+            A_MoveSprite(id,walk,CLIPMASK0);
+        }
         enemyIdleScore[id]=0;++nativeAggroWakes;
     }
 }
 static void HordeTick(){
-    if(!OwnWorld()||gameTicks%26)return;
+    if(!OwnWorld()||gameTicks%Max(9,26-(int)activeBanes[0]*3+(int)activeBoons[0]*2))return;
     activeEnemies=CountEnemies();
     // Mobile-aware cap: ambition without exceeding the engine sprite budget.
     int cap=Min(250,64+wave*9 + (numplayers-1)*18);
@@ -1218,15 +1693,17 @@ static void HordeTick(){
     for(bssize_t TRAVERSE_CONNECT(i))if(Alive(i)&&len<MAXPLAYERS)seats[len++]=i;
     if(!len)return;
     // Guaranteed milestone boss attempt even if the ordinary horde is at cap.
-    if(wave>=5 && wave%5==0 && bossWave!=wave){
+    if(wave>=Max(3,5-(int)activeBanes[3]+(int)activeBoons[3]) && wave%Max(2,5-(int)activeBanes[3]+(int)activeBoons[3])==0 && bossWave!=wave){
         if(HasArt(BOSS1) && SpawnOne(seats[RandomBounded(len)],BOSS1,true)>=0)bossWave=wave;
     }
+    cap=Min(250,cap+(int)activeBanes[0]*7);
+    cap=Max(16,cap-(int)activeBoons[0]*4);
     if(activeEnemies>=cap)return;
-    int burst=Min(kMaxSpawnsPerBurst,3+wave/2+spawnDebt);
+    int burst=Min(kMaxSpawnsPerBurst,3+wave/2+spawnDebt+(int)activeBanes[0]*2);
     burst=Min(burst,cap-activeEnemies);
     int made=0;
     for(int i=0;i<burst;++i){
-        bool elite=wave>=4 && (RandomBounded(100) < (unsigned)Min(14,1+wave/5));
+        bool elite=wave>=4 && (RandomBounded(100) < (unsigned)Min(35,1+wave/5+(int)activeBanes[3]*3));
         int tile=EnemyTile();
         if(tile>=0 && SpawnOne(seats[(gameTicks/26+i)%len],tile,elite)>=0)++made;
     }
@@ -1324,7 +1801,15 @@ static void ObserveDeaths(){
         } else if(enemyObserved[id]){
             if(s.extra<=0){
                 if(valid) QueueDrop(id);
-                else if(!enemyDropSeen[id]){
+                if(enemyLastSeen[id].value>=8 &&
+                   (enemyLastSeen[id].value>=30 || RandomBounded(100)<(uint32_t)Clamp(24+(int)activeBoons[4]*9-(int)activeBanes[4]*3,1,85)))
+                    SpawnChestAt(enemyLastSeen[id]);
+                // Elites occasionally leave a global XP-vacuum collectible;
+                // boss deaths guarantee one when a cache slot is available.
+                if(enemyLastSeen[id].value>=8 &&
+                   (enemyLastSeen[id].value>=30 || RandomBounded(100)<24))
+                    SpawnXPVacuum(enemyLastSeen[id]);
+                if(!valid && !enemyDropSeen[id]){
                     int next=(dropWrite+1)%kDeathQueueLimit;
                     if(next!=dropRead){drops[dropWrite]=enemyLastSeen[id];dropWrite=next;enemyDropSeen[id]=1;}
                 }
@@ -1336,7 +1821,15 @@ static void ObserveDeaths(){
 static void CreateGem(Drop const& d){
     int freeSlot=-1;
     for(int i=0;i<kGemLimit;++i)if(gems[i].id<0){freeSlot=i;break;}
-    if(freeSlot<0)return;
+    if(freeSlot<0){
+        // Never lose earned XP because the bounded native sprite pool is full.
+        // Merge the overflow into a live pickup for the future vacuum sweep.
+        for(auto &existing:gems)if(existing.id>=0){
+            existing.value=Min(INT_MAX-Max(0,d.value),existing.value)+Max(0,d.value);
+            return;
+        }
+        return;
+    }
     if(d.sectorId<0||d.sectorId>=numsectors)return;
     // A real, rendered Duke ART tile in the original Build actor array.
     int tile=GemTile();
@@ -1352,6 +1845,11 @@ static void CreateGem(Drop const& d){
 }
 static void EffectAt(int x,int y,int z,int16_t sectorId,int tile,int pal,int life,int size);
 static void ProcessGems(){
+    const bool vacuumActive=xpVacuum.ticks>0 && Alive(xpVacuum.seat);
+    if(xpVacuum.ticks>0){
+        if(vacuumActive)--xpVacuum.ticks;
+        else {xpVacuum.ticks=0;xpVacuum.seat=-1;}
+    }
     // Deletion callbacks enqueue; here the original world tick is complete.
     int budget=48;
     while(dropRead!=dropWrite && budget--){CreateGem(drops[dropRead]);dropRead=(dropRead+1)%kDeathQueueLimit;}
@@ -1361,9 +1859,11 @@ static void ProcessGems(){
         auto &s=sprite[g.id];
         // Ground collision and short, damped bounces; no perpetual levitation.
         // Magnet movement below is horizontal only and cannot override gravity.
-        auto const contact=StepGroundPhysics(g.id,g.vz,1<<8,115,1300,
-                                            g.bounces<3?28:0);
-        if(contact.grounded && g.vz<0)++g.bounces;
+        if(!vacuumActive){
+            auto const contact=StepGroundPhysics(g.id,g.vz,1<<8,115,1300,
+                                                g.bounces<3?28:0);
+            if(contact.grounded && g.vz<0)++g.bounces;
+        }
         // Pulsating crystal art is an ORIGINAL Duke ART sprite, not HTML art.
         // Strong native ART pulsation with independent rarity palettes.
         int phase=(g.age+g.id*3)%32;
@@ -1374,14 +1874,46 @@ static void ProcessGems(){
         s.pal=(g.value>=30?8:(g.value>=8?6:(g.value>=4?2:1)));
         if((g.age+g.id)%14==0 && (g.age/14)%2==0)
             EffectAt(s.x,s.y,s.z,s.sectnum,TRANSPORTERSTAR,s.pal,9,16);
-        if(++g.age>kHz*100){A_DeleteSprite(g.id);g=Gem{};continue;}
+        // Missed experience persists throughout a run, so a later vacuum
+        // never loses an old orb because an arbitrary age timer expired.
+        if(g.age<INT_MAX-1)++g.age;
+        if(vacuumActive){
+            const int seat=xpVacuum.seat;
+            const auto& player=sprite[g_player[seat].ps->i];
+            const int64_t dx=(int64_t)player.x-s.x,dy=(int64_t)player.y-s.y;
+            const int64_t d=dx*dx+dy*dy;
+            const int near=kVacuumCollectRadius;
+            if(d<(int64_t)near*near){
+                GrantXP(seat,g.value);++xpVacuum.collected;
+                A_DeleteSprite(g.id);g=Gem{};continue;
+            }
+            // Direct sector-aware relocation, *not* A_MoveSprite(CLIPMASK0):
+            // only vacuumed XP ignores solid walls, never combat actors.
+            const int sx=XPClampStep(dx,3,kVacuumMaxStep);
+            const int sy=XPClampStep(dy,3,kVacuumMaxStep);
+            const int nx=s.x+sx,ny=s.y+sy;
+            int16_t next=s.sectnum;
+            updatesector(nx,ny,&next);
+            if(next<0||next>=numsectors)next=player.sectnum;
+            if(next>=0 && next<numsectors && next!=s.sectnum)
+                changespritesect(g.id,next);
+            s.x=nx;s.y=ny;
+            s.z+=XPClampStep((int64_t)player.z-s.z,3,18<<8);
+            // Do not wait for a second physics tick after reaching the player.
+            const int64_t remx=(int64_t)player.x-s.x,remy=(int64_t)player.y-s.y;
+            if(remx*remx+remy*remy<(int64_t)near*near){
+                GrantXP(seat,g.value);++xpVacuum.collected;
+                A_DeleteSprite(g.id);g=Gem{};
+            }
+            continue;
+        }
         int who=-1;int64_t dist=INT64_MAX;
         for(bssize_t TRAVERSE_CONNECT(i)){
             if(!Alive(i))continue;
             auto const &p=sprite[g_player[i].ps->i];
             int64_t dx=static_cast<int64_t>(p.x)-s.x,dy=static_cast<int64_t>(p.y)-s.y;
             int64_t d=dx*dx+dy*dy;
-            int radius=1400 + fighters[i].skill[12]*780;
+            int radius=kXPBaseMagnetRadius + fighters[i].skill[12]*kXPMagnetRankRadius;
             int zDelta=(p.z-s.z)>>8;
             if(zDelta<-64||zDelta>64)continue;
             // Don't make XP fly through solid walls just because sectors overlap.
@@ -1390,13 +1922,14 @@ static void ProcessGems(){
         }
         if(who<0)continue;
         auto const &p=sprite[g_player[who].ps->i];
-        if(dist<300LL*300){
+        if(dist<360LL*360){
             GrantXP(who,g.value);
             A_DeleteSprite(g.id);g=Gem{};
         } else {
             // Magnetizes within the same Build sector and never crosses walls
             // without a valid destination sector from the actual engine.
-            int const nx=s.x+(p.x-s.x)/6,ny=s.y+(p.y-s.y)/6;
+            int const nx=s.x+XPClampStep((int64_t)p.x-s.x,3,3600);
+            int const ny=s.y+XPClampStep((int64_t)p.y-s.y,3,3600);
             int16_t sec=s.sectnum;updatesector(nx,ny,&sec);
             if(sec>=0 && sec<numsectors){
                 A_MoveSprite(g.id,{nx-s.x,ny-s.y,0},CLIPMASK0);
@@ -1755,6 +2288,19 @@ static bool DamageTarget(int seat,int enemy,int damage,int weaponTile){
     auto const &p=sprite[g_player[seat].ps->i];
     auto const& skill=fighters[seat].skill;
     if(skill[129])damage+=skill[129]*3; // heavy payload
+    // Every generic equipment fusion is a native damage-synergy link.
+    // Cap aggregate bonus to avoid unbounded cascading power scaling.
+    int fusionSynergy=0;
+    for(int skillId=0;skillId<kSkillCount;++skillId){
+        auto const& f=fighters[seat];
+        if(f.fused[skillId] && f.skill[skillId]>0 && IsWeaponSkill(skillId))
+            fusionSynergy+=5+(int)f.rarity[skillId]*3;
+    }
+    damage+=damage*Min(75,fusionSynergy)/100;
+    damage+=damage*activeBoons[2]/10;
+    damage+=damage*activeBoons[5]/12;
+    damage=Max(1,damage-damage*activeBanes[5]/12);
+    damage=Max(1,damage-damage*activeBanes[2]/12);
     if(IsSurvivorRat(enemy) && skill[131])damage+=skill[131]*4; // rat slayer
     if(e.picnum==BOSS1 && skill[132])damage+=skill[132]*6; // boss breaker
     if(e.pal==7 && skill[141])damage+=skill[141]*3; // elite hunter
@@ -1768,7 +2314,19 @@ static bool DamageTarget(int seat,int enemy,int damage,int weaponTile){
     int dealt=Max(0,before-e.extra);
     if(hitCode>=0 && e.extra<0)e.extra=0; // keep original CON death predicates reachable
     combatLastVictim=enemy;combatLastHPBefore=before;
-    if(hitCode<0){a.htextra=-1;a.htpicnum=-1;++blockedHits;return false;} // Preserve explicit PREACTORDAMAGE veto.
+    if(hitCode<0){
+        a.htextra=-1;a.htpicnum=-1;++blockedHits;
+        // Script-defined invulnerability is honored for the first two hits.
+        // If an actual hostile is repeatedly damage-vetoed while remaining
+        // alive, its gameplay instance cannot become permanently immortal.
+        // Boss scripts retain their intentional protected phases.
+        if(enemyDamageVetoStreak[enemy]<255)++enemyDamageVetoStreak[enemy];
+        if(enemyDamageVetoStreak[enemy]<(e.picnum==BOSS1?5:3))return false;
+        e.extra=Max(0,before-Max(1,damage));
+        ++nativeDamageFallbacks;
+        // Restore a zero-damage CON notification, not a second HP hit.
+        a.htextra=0;a.htpicnum=weaponTile;a.htowner=g_player[seat].ps->i;
+    }else enemyDamageVetoStreak[enemy]=0;
     // V38 combat invariant: some stock CON actors accept the hit event but
     // do not change HP while fighting another actor / in transition states.
     // The native Survivor armory must still be able to kill those enemies.
@@ -2118,6 +2676,156 @@ static int ClosestEnemy(int x,int y,int z,int16_t sec,int range,const uint8_t *u
     }
     return best;
 }
+// ========================================================================
+// DXV47_PHYSICAL_COMBAT — no fake A_Shoot-only spiral or Devastator barrels.
+// A spawned missile has its own valid sector, trajectory, collision and
+// enemy-only damage. Original A_RadiusDamage is deliberately not called, so
+// the player cannot die to a friendly auto-weapon in the survivors mode.
+// ========================================================================
+static void V47MissileReset(){
+    for(auto &b:v47Missiles){
+        if(b.id>=0 && b.id<MAXSPRITES && sprite[b.id].statnum==STAT_FX &&
+           sprite[b.id].picnum==b.originalTile)A_DeleteSprite(b.id);
+        b=V47Missile{};
+    }
+    v47MissilesLaunched=v47MissilesImpacted=0;
+    v47ShotgunContacts=v47RailGuaranteed=v47TransformerReactions=0;
+}
+static bool V47LaunchMissile(int seat,int kind,int rank,int angle,int phase){
+    if(!Alive(seat)||!OwnWorld())return false;
+    V47Missile* slot=nullptr;
+    for(auto &m:v47Missiles)if(m.id<0){slot=&m;break;}
+    if(!slot)return false;
+    const auto &p=sprite[g_player[seat].ps->i];
+    if(p.sectnum<0||p.sectnum>=numsectors)return false;
+    const int tile=HasArt(RPG)?RPG:V47Art(6);
+    const int ar=ArtRepeat(tile,22);
+    int startX=p.x+(int)((int64_t)sintable[(angle+512)&2047]*250/16384);
+    int startY=p.y+(int)((int64_t)sintable[angle&2047]*250/16384);
+    int16_t startSector=p.sectnum;updatesector(startX,startY,&startSector);
+    if(startSector<0 || startSector>=numsectors){startX=p.x;startY=p.y;startSector=p.sectnum;}
+    int id=A_InsertSprite(startSector,startX,startY,p.z-(17<<8),tile,-28,
+                          ar,ar,angle&2047,0,0,g_player[seat].ps->i,STAT_FX);
+    if(id<0)return false;
+    sprite[id].owner=g_player[seat].ps->i;
+    sprite[id].cstat=0;
+    *slot={id,seat,kind,Max(1,rank),130,angle&2047,0,phase,
+           kind==2?460:kind==1?510:490,tile,-1};
+    ++v47MissilesLaunched;
+    return true;
+}
+static void V47MissileDetonate(V47Missile &m){
+    const int id=m.id;
+    if(id>=0 && id<MAXSPRITES && sprite[id].statnum==STAT_FX){
+        const auto p=sprite[id];
+        if(p.sectnum>=0 && p.sectnum<numsectors){
+            const int radius=950+m.rank*200+(m.kind==1?450:0);
+            const int damage=8+m.rank*6+(m.kind==1?6:0);
+            ConfirmBlastDamage(m.seat,p.x,p.y,p.z,p.sectnum,radius,damage);
+            EffectAt(p.x,p.y,p.z,p.sectnum,EXPLOSION2,0,20,39);
+            if(m.kind==2){
+                // Scatter-shrapnel follow-up to evolved demolition missiles.
+                ConfirmBlastDamage(m.seat,p.x,p.y,p.z,p.sectnum,
+                                   radius+400,Max(3,damage/3));
+            }
+        }
+        A_DeleteSprite(id);
+    }
+    ++v47MissilesImpacted;
+    m=V47Missile{};
+}
+static void V47MissileTick(){
+    for(auto &m:v47Missiles){
+        if(m.id<0)continue;
+        const int id=m.id;
+        if(!OwnWorld() || !Alive(m.seat) || id>=MAXSPRITES ||
+           sprite[id].statnum!=STAT_FX || sprite[id].picnum!=m.originalTile){
+            if(id>=0 && id<MAXSPRITES && sprite[id].statnum==STAT_FX &&
+               sprite[id].picnum==m.originalTile)A_DeleteSprite(id);
+            m=V47Missile{};continue;
+        }
+        auto &b=sprite[id];
+        ++m.age;
+        if(--m.life<=0){V47MissileDetonate(m);continue;}
+        // Turn toward target at a finite rate; spiral is a real spatial
+        // oscillation perpendicular to travel, not a rotating picture tile.
+        if(m.target<0 || m.target>=MAXSPRITES ||
+           !IsSurvivorEnemy(m.target) || sprite[m.target].extra<=0 ||
+           (m.age%6)==0)
+            m.target=ClosestEnemy(b.x,b.y,b.z,b.sectnum,14500);
+        const int enemy=m.target;
+        int dz=0;
+        if(enemy>=0){
+            const auto &e=sprite[enemy];
+            const int wanted=getangle(e.x-b.x,e.y-b.y);
+            const int diff=((wanted-m.angle+1024)&2047)-1024;
+            m.angle=(m.angle+Clamp(diff,-28-m.rank*2,28+m.rank*2))&2047;
+            dz=Clamp((e.z-(11<<8)-b.z)/9,-900,900);
+        }
+        const int spiral=m.kind==0?(sintable[(m.age*96+m.phase)&2047]*110/16384):
+                         (sintable[(m.age*55+m.phase)&2047]*65/16384);
+        const int vx=(int)((int64_t)sintable[(m.angle+512)&2047]*m.speed/16384);
+        const int vy=(int)((int64_t)sintable[m.angle]*m.speed/16384);
+        const int sideX=(int)((int64_t)sintable[(m.angle+1024)&2047]*spiral/16384);
+        const int sideY=(int)((int64_t)sintable[(m.angle+512)&2047]*spiral/16384);
+        const int hit=A_MoveSprite(id,{vx+sideX,vy+sideY,dz},
+                                   m.age<3?CLIPMASK0:CLIPMASK1);
+        if(b.sectnum<0||b.sectnum>=numsectors){V47MissileDetonate(m);continue;}
+        bool contact=hit!=0;
+        if(enemy>=0 && sprite[enemy].statnum>=0){
+            const int64_t dx=(int64_t)b.x-sprite[enemy].x;
+            const int64_t dy=(int64_t)b.y-sprite[enemy].y;
+            if(dx*dx+dy*dy<350LL*350 && std::abs(b.z-sprite[enemy].z)<(32<<8))contact=true;
+        }
+        const int32_t floor=getflorzofslope(b.sectnum,b.x,b.y);
+        const int32_t ceil=getceilzofslope(b.sectnum,b.x,b.y);
+        if(b.z>floor-(3<<8)||b.z<ceil+(3<<8))contact=true;
+        if(contact){V47MissileDetonate(m);continue;}
+        b.ang=m.angle;
+        if((m.age%5)==0)EffectAt(b.x,b.y,b.z,b.sectnum,
+                                 m.kind==0?FIRELASER:TRANSPORTERSTAR,0,7,18);
+    }
+}
+static int V47ScatterShot(int seat,int angle,int rank,int nominated){
+    if(!Alive(seat)||!OwnWorld())return 0;
+    const auto &p=sprite[g_player[seat].ps->i];
+    int hits=0;
+    for(int id=0;id<MAXSPRITES && hits<8;++id){
+        const auto &e=sprite[id];
+        if(e.extra<=0 || (e.statnum!=STAT_ACTOR && e.statnum!=STAT_ZOMBIEACTOR) ||
+           !IsSurvivorEnemy(id) || e.sectnum<0)continue;
+        const int64_t dx=(int64_t)e.x-p.x,dy=(int64_t)e.y-p.y;
+        const int64_t dist2=dx*dx+dy*dy;
+        const int radius=7700+rank*350;
+        if(dist2>(int64_t)radius*radius)continue;
+        const int bearing=getangle(e.x-p.x,e.y-p.y);
+        const int delta=std::abs(((bearing-angle+1024)&2047)-1024);
+        if(delta>185+rank*12)continue;
+        if(!cansee(p.x,p.y,p.z-(16<<8),p.sectnum,
+                   e.x,e.y,e.z-(9<<8),e.sectnum))continue;
+        const int damage=Max(2,(13+rank*4)*ItemPercent(fighters[seat],SHOTGUN)/100);
+        if(DamageTarget(seat,id,damage,SHOTSPARK1)){
+            ++hits;++v47ShotgunContacts;
+            if(fighters[seat].skill[10]>0 || rank>=4){
+                const int radius=600+rank*60;
+                ConfirmBlastDamage(seat,e.x,e.y,e.z,e.sectnum,radius,
+                                  Max(2,rank+fighters[seat].skill[10]));
+                EffectAt(e.x,e.y,e.z-(10<<8),e.sectnum,EXPLOSION2,0,12,24);
+            }
+        }
+    }
+    // Targeted shots always have a canonical hit even with tiny rat art.
+    if(hits==0 && nominated>=0 && nominated<MAXSPRITES &&
+       IsSurvivorEnemy(nominated) && sprite[nominated].extra>0){
+        const auto &e=sprite[nominated];
+        if(cansee(p.x,p.y,p.z-(16<<8),p.sectnum,e.x,e.y,e.z-(9<<8),e.sectnum) &&
+           DamageTarget(seat,nominated,9+rank*4,SHOTSPARK1)){
+            ++hits;++v47ShotgunContacts;
+        }
+    }
+    return hits;
+}
+
 // Authentic Build-world thrown ordnance. A_MoveSprite resolves collision with
 // walls and other sprites; the game simulation updates fuse/drag/gravity/bounce.
 // The native engine handles radius damage, CON pain/death, and destructible walls.
@@ -2301,8 +3009,22 @@ static void AdvancedOrdnanceTick(int seat){
             BudgetShoot(ps->i,tile);
             // Native body expansion works even where shareware's optional
             // GROWSPARK graphic is absent (the RPG is art-only fallback).
-            if(DamageTarget(seat,target,3+f.skill[EXPANDER_RAY]*2,RADIUSEXPLOSION))
+            const bool wasShrunk=afflictions[target].kind==EC_MINI &&
+                                 gameTicks<afflictions[target].until;
+            if(DamageTarget(seat,target,3+f.skill[EXPANDER_RAY]*2,RADIUSEXPLOSION)){
                 AfflictEnemy(seat,target,EC_GROWING,f.skill[EXPANDER_RAY]);
+                if(wasShrunk){
+                    // Reversed quantum compression: instant body expansion and
+                    // a friendly-safe enemy-only shockwave. Actual HP changes.
+                    const auto &enemy=sprite[target];
+                    ConfirmBlastDamage(seat,enemy.x,enemy.y,enemy.z,enemy.sectnum,
+                                       1100+f.skill[EXPANDER_RAY]*160,
+                                       9+f.skill[EXPANDER_RAY]*4);
+                    EffectAt(enemy.x,enemy.y,enemy.z-(12<<8),enemy.sectnum,
+                             EXPLOSION2,0,17,40);
+                    ++v47TransformerReactions;
+                }
+            }
             ps->q16ang=old;
             if(tile==RPG)EffectAt(sprite[target].x,sprite[target].y,sprite[target].z,
                            sprite[target].sectnum,TRANSPORTERSTAR,6,12,35);
@@ -2752,18 +3474,31 @@ static void AbilityTick(int seat){
             if(skill==ROCKET_CYCLONE)angle=(angle+gameTicks*7)&2047;
             if(skill==STORM_GRID && (j%2))angle=(angle+1024)&2047;
             p->q16ang=fix16_from_int(angle);
-            if(skill!=RAILGUN && skill!=PIERCING_RAILS && skill!=SPINAL_RAIL)
+            if(skill==ROCKET_CYCLONE){
+                V47LaunchMissile(seat,0,rank,angle,(j*547+gameTicks*19)&2047);
+            }else if(skill!=RAILGUN && skill!=PIERCING_RAILS && skill!=SPINAL_RAIL)
                 BudgetShoot(p->i,tile);
         }
         p->q16ang=original;
         // DXV29: different advanced weapons must have their own spatial effects.
         if(skill==DX_NAPALM_WAVE)PlaceNapalmField(seat,rank);
         if(skill==CRYO_SHATTER || skill==SHRINK_SWARM){
-            int enemy=ClosestEnemy(sprite[p->i].x,sprite[p->i].y,sprite[p->i].z,
-                                   sprite[p->i].sectnum,kTargetRadius);
-            if(enemy>=0 && DamageTarget(seat,enemy,3+rank*2,
-                            skill==CRYO_SHATTER?FREEZEBLAST:SHRINKSPARK))
-                AfflictEnemy(seat,enemy,skill==CRYO_SHATTER?EC_FROZEN:EC_MINI,rank);
+            uint8_t used[MAXSPRITES]={};
+            for(int strike=0;strike<(skill==SHRINK_SWARM?Clamp(1+rank/2,1,5):1);++strike){
+                int enemy=ClosestEnemy(sprite[p->i].x,sprite[p->i].y,sprite[p->i].z,
+                                       sprite[p->i].sectnum,kTargetRadius,used);
+                if(enemy<0)break;
+                used[enemy]=1;
+                if(DamageTarget(seat,enemy,3+rank*2,
+                         skill==CRYO_SHATTER?FREEZEBLAST:SHRINKSPARK)){
+                    AfflictEnemy(seat,enemy,skill==CRYO_SHATTER?EC_FROZEN:EC_MINI,rank);
+                    if(skill==SHRINK_SWARM){
+                        const auto &body=sprite[p->i],&target=sprite[enemy];
+                        EffectLine(body.x,body.y,body.z-(11<<8),body.sectnum,
+                                   target.x,target.y,target.z-(9<<8),SHRINKSPARK,6,4);
+                    }
+                }
+            }
         }
         if(skill==RAILGUN || skill==PLASMA || skill==STORM_GRID || skill==PIERCING_RAILS){
             const auto &body=sprite[p->i];
@@ -2774,11 +3509,19 @@ static void AbilityTick(int seat){
                 auto const laser=DrawThickBeam(body.x,body.y,body.z-(14<<8),body.sectnum,
                            enemy.x,enemy.y,enemy.z-(12<<8),rail?2:7,rail?13:9,
                            rail?8:7,9,nullptr,BP_STOP_AT_WATER|BP_HIT_PROPS,!rail);
-                BeamDamageCrossings(laser,seat,rail?180:130,
+                const int railHits=BeamDamageCrossings(laser,seat,rail?180:130,
                     (rail?12:7)+rank*5+f.skill[AMPLIFIER]*3,FIRELASER,
                     (skill==PLASMA||skill==STORM_GRID)?EC_SHOCKED:
                     (rail&&f.skill[CRYO_SHATTER]>=4)?EC_FROZEN:EC_NONE,rank,
                     rail?10:3,6);
+                // A rat's 7x6 ART or a script-resized target can be smaller
+                // than the traced capsule. If unobstructed, one direct hit is
+                // still confirmed through native damage, never a fake FX hit.
+                if(rail && railHits==0 &&
+                   cansee(body.x,body.y,body.z-(14<<8),body.sectnum,
+                          enemy.x,enemy.y,enemy.z-(12<<8),enemy.sectnum) &&
+                   DamageTarget(seat,target,12+rank*5+f.skill[AMPLIFIER]*3,FIRELASER))
+                    ++v47RailGuaranteed;
                 if(laser.surface!=BS_SKY && laser.endSector>=0)
                     EffectAt(laser.x,laser.y,laser.z,laser.endSector,
                              TRANSPORTERSTAR,7,8,25);
@@ -2815,13 +3558,33 @@ static void ArsenalLegacyWeaponsTick(int i,int a,int nativeTarget){
                   (f.skill[MOMENTUM_ENGINE]?Min(18,f.combo/5)*f.skill[MOMENTUM_ENGINE]/3:0)))/100);
             int offset=w*13+i*17;
             if((gameTicks+offset)%period)continue;
-            FireWeapon(i,w,a,rank);
+            if(w==DEVASTATOR){
+                const int rockets=Clamp(2+rank/3,2,4);
+                for(int j=0;j<rockets;++j){
+                    const int offset=(j-(rockets-1)/2)*96;
+                    V47LaunchMissile(i,1,rank,(a+offset)&2047,(j*600+gameTicks*7)&2047);
+                }
+            }else FireWeapon(i,w,a,rank);
+            if(w==SHOTGUN)V47ScatterShot(i,a,rank,nativeTarget);
             // The weapon's real AutoAim target receives an applied, verified
             // native hit.  Projectile art and actor simulation still run, but
             // the special status is no longer contingent on a CON branch.
-            if(nativeTarget>=0 && (w==FREEZE || w==SHRINK || w==LASER)){
-                const int hitTile=w==FREEZE?FREEZEBLAST:w==SHRINK?SHRINKSPARK:FIRELASER;
-                if(DamageTarget(i,nativeTarget,w==LASER?4+rank*2:1+rank,hitTile)){
+            if(nativeTarget>=0 && (w==PISTOL || w==ROCKET ||
+                                     w==FREEZE || w==SHRINK || w==LASER)){
+                const int hitTile=WeaponTile(w);
+                // V46: A_Shoot's visible projectile alone is not an accepted HP
+                // event for native Survivor rats or every CON evasive state.
+                // Independently validate the visible target through Build LOS,
+                // then dispatch once through the canonical DamageTarget path.
+                const auto &src=sprite[g_player[i].ps->i];
+                const auto &dst=sprite[nativeTarget];
+                if(!cansee(src.x,src.y,src.z-(16<<8),src.sectnum,
+                           dst.x,dst.y,dst.z-(12<<8),dst.sectnum))continue;
+                int hitDamage=(w==PISTOL?5+rank*3:
+                    w==SHOTGUN?7+rank*5:w==ROCKET?11+rank*6:
+                    w==DEVASTATOR?9+rank*5:w==LASER?4+rank*2:1+rank);
+                hitDamage=Max(1,hitDamage*ItemPercent(f,w)/100);
+                if(DamageTarget(i,nativeTarget,hitDamage,hitTile)){
                     if(w==FREEZE)AfflictEnemy(i,nativeTarget,EC_FROZEN,rank);
                     else if(w==SHRINK)AfflictEnemy(i,nativeTarget,EC_MINI,rank);
                     else {
@@ -3249,54 +4012,71 @@ static void Tick(){
     wave=1+gameTicks/(kHz*35);
     for(bssize_t TRAVERSE_CONNECT(i))SurvivalTick(i);
     if(OwnWorld()){
-        RatTick();ObserveDeaths();HordeTick();EnemyAggroWatchdogTick();WeaponsTick();NativeBoltTick();ThrownTick();TripwiresTick();NapalmFieldsTick();ConditionsTick();VisualsTick();BeamStripsTick();ProcessGems();ProcessSupplies();
+        RatTick();ObserveDeaths();HordeTick();EnemyAggroWatchdogTick();WeaponsTick();NativeBoltTick();V47MissileTick();ThrownTick();TripwiresTick();NapalmFieldsTick();ConditionsTick();VisualsTick();BeamStripsTick();ProcessGems();ProcessSupplies();
     }
+}
+// DXV48_COMPACT_HUD: 10 compact native icon cells, no full-width telemetry.
+static void DrawStatCell(int centerX,int centerY,int tile,int value,int pal=0){
+    const int plate=V47Art(11); // original masked plate/frame, not HTML overlay
+    if(HasArt(plate))rotatesprite_fs(centerX<<16,centerY<<16,35000L,0,
+                                     plate,14,0,2|8|64);
+    if(!HasArt(tile))tile=SHOTSPARK1;
+    rotatesprite_fs((centerX-15)<<16,centerY<<16,13000L,0,
+                    tile,-24,pal,2|8|64);
+    char buf[15];
+    if(value>=10000)std::snprintf(buf,sizeof(buf),"%dK",value/1000);
+    else std::snprintf(buf,sizeof(buf),"%d",value);
+    // One short number, with a sprite icon as its semantic label.
+    printext256(centerX-4,centerY-4,15,0,buf,1);
 }
 static void DrawHUD(){
     if(!initialized||!Alive(myconnectindex))return;
-    auto const &f=fighters[myconnectindex];
-    char buf[220];
-    std::snprintf(buf,sizeof(buf),"DUKE X | LV%03d  XP %d/%d  WAVE %02d  KILLS %d  %02d:%02d",
-                  f.level,f.xp,f.threshold,wave,f.kills,gameTicks/(kHz*60),(gameTicks/kHz)%60);
-    printext256(8,8,15,0,buf,1);
-    std::snprintf(buf,sizeof(buf),"ALIENS %d  TOKENS %d  PERKS %d  CHAIN x%d",activeEnemies,careerCredits,careerRank,1+Min(4,f.combo/10));
-    printext256(8,20,14,0,buf,1);
-    if(f.skill[ROCKET]>=5 && f.skill[8]>=3)
-        printext256(8,32,14,0,"FUSION: NUCLEAR OVERCLOCK",1);
-    else if(f.skill[FREEZE]>=5 && f.skill[9]>=3)
-        printext256(8,32,14,0,"FUSION: CRYO NOVA",1);
-    else if(f.skill[SHRINK]>=5 && f.skill[12]>=3)
-        printext256(8,32,14,0,"FUSION: SHRINK SINGULARITY",1);
-    else if(f.skill[PISTOL]>=5 && f.skill[7]>=3)
-        printext256(8,32,14,0,"FUSION: LEAD CYCLONE",1);
-    // Native in-game armory telemetry: what actually fires and remains equipped.
-    int armed=0,passives=0;int bytes=0;char active[220]="WEAPONS: ";
-    for(int id=0;id<kSkillCount && armed<3;++id){
-        if(!IsWeaponSkill(id)||!f.skill[id])continue;
-        char item[55];std::snprintf(item,sizeof(item),"%s%s R%d",armed?" / ":"",skillNames[id],f.skill[id]);
-        int length=static_cast<int>(std::strlen(item));
-        if(bytes+length>150)break;
-        std::strcat(active,item);bytes+=length;++armed;
+    // Full-screen choices own the view: no stat cells drawn over the prizes.
+    if(chestReveal.seat>=0){DrawChestReveal();return;}
+    if(twistChoice.seat>=0){DrawTwistSelection();return;}
+    const auto& f=fighters[myconnectindex];
+    char buf[140];
+    // Keep the XP progress bar at top with rank and a narrow 26-cell fill.
+    const int filled=Clamp((int)((int64_t)f.xp*26/Max(1,f.threshold)),0,26);
+    std::snprintf(buf,sizeof(buf),"LV%d",f.level);
+    printext256(5,3,15,0,buf,1);
+    const int crystal=HasArt(CRYSTALAMMO)?CRYSTALAMMO:SHOTSPARK1;
+    for(int j=0;j<26;++j)
+        rotatesprite_fs((47+j*10)<<16,6<<16,8000L,0,
+                        crystal,j<filled?-32:52,j<filled?7:0,2|8|64);
+    auto const p=g_player[myconnectindex].ps;
+    const int leftX=33,rightX=87;
+    DrawStatCell(leftX,23,ATOMICHEALTH,Max(0,sprite[p->i].extra),0);
+    DrawStatCell(rightX,23,HEAVYHBOMB,p->inv_amount[GET_SHIELD],0);
+    DrawStatCell(leftX,44,RAT,activeEnemies,0);
+    DrawStatCell(rightX,44,RPGAMMO,wave,0);
+    DrawStatCell(leftX,65,SHOTSPARK1,f.kills,0);
+    DrawStatCell(rightX,65,TRIPBOMB,tripwireDetonations,0);
+    DrawStatCell(leftX,86,CRYSTALAMMO,careerCredits,0);
+    DrawStatCell(rightX,86,RPG,EquippedWeapons(f),0);
+    DrawStatCell(leftX,107,crystal,xpVacuum.ticks>0?xpVacuum.ticks/kHz:0,
+                 xpVacuum.ticks>0?7:0);
+    DrawStatCell(rightX,107,FREEZEBLAST,(gameTicks/kHz)/60,0);
+    // A discrete chest arrow is retained without full-width debug text.
+    int nearbyChest=-1;int64_t nearSq=INT64_MAX;
+    auto const &playerPos=sprite[p->i];
+    for(auto const &c:caches)if(c.kind==5 && c.id>=0 && c.id<MAXSPRITES &&
+       sprite[c.id].statnum==STAT_FX){
+        auto const &ch=sprite[c.id];
+        int64_t dx=(int64_t)ch.x-playerPos.x,dy=(int64_t)ch.y-playerPos.y;
+        const int64_t d=dx*dx+dy*dy;
+        if(d<nearSq){nearSq=d;nearbyChest=c.id;}
     }
-    char supports[220]="PASSIVES: ";bytes=0;
-    for(int id=0;id<kSkillCount && passives<3;++id){
-        if(IsWeaponSkill(id)||!f.skill[id])continue;
-        char item[55];std::snprintf(item,sizeof(item),"%s%s R%d",passives?" / ":"",skillNames[id],f.skill[id]);
-        int length=static_cast<int>(std::strlen(item));
-        if(bytes+length>140)break;
-        std::strcat(supports,item);bytes+=length;++passives;
+    if(nearbyChest>=0){
+        const auto &ch=sprite[nearbyChest];
+        int heading=(getangle(ch.x-playerPos.x,ch.y-playerPos.y)-playerPos.ang)&2047;
+        const char* dir=(heading<256||heading>1792)?"^":heading<1024?">":"<";
+        printext256(303,19,14,0,dir,1);
     }
-    std::snprintf(buf,sizeof(buf),"RUN %d%%  GEARS %d  FIRES %d  ARCS %d  TRAPS %d",
-                  DukeX_WorldMoveScalePercent(myconnectindex,g_player[myconnectindex].input.fvel,
-                       g_player[myconnectindex].input.svel),
-                  EquippedWeapons(f),napalmBursts,arcHits,tripwireDetonations);
-    printext256(8,65,14,0,buf,1);
-    if(armed)printext256(8,77,15,0,active,1);
-    if(passives)printext256(8,89,15,0,supports,1);
-    if(lastCacheAward>=0 && lastCacheAward<kSkillCount && gameTicks<cacheBannerUntil){
-        std::snprintf(buf,sizeof(buf),"POWER CACHE ACQUIRED: %s",skillNames[lastCacheAward]);
-        printext256(8,46,14,0,buf,1);
-    }
+    if(lastBoon>=0 && gameTicks<lastBoonUntil)
+        printext256(8,125,lastBoon>=8?2:14,0,lastBoon>=8?"BANE":"BOON",1);
+    if(xpVacuum.ticks>0)
+        printext256(8,136,7,0,"XP SWEEP",1);
     // All non-Web builds have a genuine engine-rendered selection screen.
     // Browser builds use the richer HTML cards; game rules stay in C++.
 #ifndef __EMSCRIPTEN__
@@ -3326,6 +4106,13 @@ static void DrawHUD(){
 // Invoked from original drawframe_do: even a paused survivor game still renders.
 static void HandleNativeUpgradeKeys(){
 #ifndef __EMSCRIPTEN__
+    if(twistChoice.seat>=0){
+        for(int k=0;k<3;++k){
+            int const key=k==0?sc_1:(k==1?sc_2:sc_3);
+            if(KB_KeyPressed(key)){KB_ClearKeyDown(key);ChooseTwist(k+1);return;}
+        }
+        return;
+    }
     if(!HasPendingUpgrade())return;
     if(!BeginOffer(myconnectindex))return;
     for(int k=0;k<3;++k){
@@ -3850,8 +4637,81 @@ extern "C" EMSCRIPTEN_KEEPALIVE void DukeX_LoadCareer(int credits,int rank){
 }
 #endif
 
+// V46 engine-owned progression introspection (no client-side authority).
+extern "C" EMSCRIPTEN_KEEPALIVE const char* DukeX_V46Marker(){
+    return "DXV46: HIT_FIX_CHESTS_FUSIONS_TWISTS_PREMAP_SLOTS_MOBILE";
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46WeaponSlots(){return DukeX::careerWeaponSlots;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46PassiveSlots(){return DukeX::careerPassiveSlots;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46ItemRarity(int id){
+    return id>=0&&id<DukeX::kSkillCount?DukeX::fighters[myconnectindex].rarity[id]:0;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46ItemStatPercent(int id){
+    return id>=0&&id<DukeX::kSkillCount?DukeX::ItemPercent(DukeX::fighters[myconnectindex],id):100;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46OfferRarity(int n){
+    return n>=1&&n<=3?DukeX::activeOfferRarity[n-1]:0;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46ItemAbsorbed(int id){
+    return id>=0&&id<DukeX::kSkillCount?DukeX::fighters[myconnectindex].absorbed[id]:0;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46FusionPartner(int id){
+    return id>=0 && id<DukeX::kSkillCount?(int)DukeX::fighters[myconnectindex].fusionPartner[id]-1:-1;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46ItemFused(int id){
+    return id>=0&&id<DukeX::kSkillCount?DukeX::fighters[myconnectindex].fused[id]:0;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46ChestCount(){return DukeX::chestsOpened;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46FusionCount(){return DukeX::chestFusions;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46BuySlot(int kind){
+    if(numplayers!=1||kind<0||kind>1)return 0;
+    int &slots=kind?DukeX::careerPassiveSlots:DukeX::careerWeaponSlots;
+    if(slots>=DukeXV46::kMaxSlots)return 0;
+    int cost=(slots-3)*45;
+    if(DukeX::careerCredits<cost)return 0;
+    DukeX::careerCredits-=cost;++slots;return 1;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46DamageChest(int victim,int source){
+    return DukeX::DamageChest(victim,source)?1:0;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46ChooseTwist(int n){
+    return DukeX::ChooseTwist(n)?1:0;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46TwistActive(){return DukeX::twistChoice.seat>=0;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46TwistType(int n){
+    if(DukeX::twistChoice.seat<0 || n<1 || n>3)return 0;
+    auto const t=DukeX::twistChoice.cards[n-1];
+    return (t.bane?-1:1)*(t.kind+1);
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46TwistStrength(int n){
+    return DukeX::twistChoice.seat<0||n<1||n>3?0:DukeX::twistChoice.cards[n-1].strength;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46ChooseSlot(int kind){return DukeX_V46BuySlot(kind);}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46LoadSlots(int weaponSlots,int passiveSlots){
+    if(numplayers!=1 || DukeX::initialized)return 0;
+    DukeX::careerWeaponSlots=DukeX::Clamp(weaponSlots,4,8);
+    DukeX::careerPassiveSlots=DukeX::Clamp(passiveSlots,4,8);
+    return 1;
+}
 // V40 native read-only GPU renderer endpoint; never participates in game state.
 #include "dukex_v40_renderer_bridge.inc"
 // DXV41: native primary rendering endpoint, ART/palette/HUD/geometry.
 #include "dukex_v41_primary_renderer.inc"
 #include "dukex_v42_renderer_beams.inc"
+
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V47PhysicalMissiles(){return DukeX::v47MissilesLaunched;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V47MissileImpacts(){return DukeX::v47MissilesImpacted;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V47ShotgunContacts(){return DukeX::v47ShotgunContacts;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V47RailGuaranteed(){return DukeX::v47RailGuaranteed;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V47TransformerReactions(){return DukeX::v47TransformerReactions;}
+
+// DXV48: compact native HUD, genuinely paused solo modals, fast XP and
+// level-wide collectible vacuum. Required marker for WASM/GitHub publish.
+extern "C" EMSCRIPTEN_KEEPALIVE const char* DukeX_V48Marker(){
+    return "DXV48: XP_GLOBAL_VACUUM_COMPACT_NATIVE_HUD_MODAL_FREEZE";
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V48VacuumTicks(){return DukeX::xpVacuum.ticks;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V48VacuumCollected(){return DukeX::xpVacuum.collected;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V48VacuumDrops(){return DukeX::xpVacuumDrops;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V48ModalActive(){return DukeX::ModalPauseActive()?1:0;}

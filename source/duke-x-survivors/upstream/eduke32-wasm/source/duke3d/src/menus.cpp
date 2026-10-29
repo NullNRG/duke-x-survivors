@@ -1,3 +1,4 @@
+#include <cstdio>
 //-------------------------------------------------------------------------
 /*
 Copyright (C) 2016 EDuke32 developers and contributors
@@ -63,6 +64,130 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #ifndef __ANDROID__
 droidinput_t droidinput;
+#endif
+
+// V46: a genuine Build-engine character picker between selecting difficulty
+// and loading the map. It is drawn by menus.cpp using native ART and fonts;
+// browser touch buttons only issue selection commands to this same state.
+#ifdef __EMSCRIPTEN__
+# include <emscripten.h>
+extern "C" int DukeX_SelectLoadout(int);
+// V46.1: the pre-map menu is authoritative inside the native Build engine.
+// Browser hit testing only forwards coordinates in the engine's 320x200 UI space.
+static int gDukeX46Premap=0, gDukeX46Choice=0, gDukeX46RequestedConfirm=0;
+extern "C" EMSCRIPTEN_KEEPALIVE const char *DukeX_V461Marker(){
+    return "DXV46.1: TAP_NATIVE_CHARACTER_CARDS_CLEAR_STALE_SKILL_SOUND_MENUS_NO_JOYSTICKS";
+}
+// V47: card taps select/highlight ONLY. A separate native PLAY action starts the map.
+// This prevents accidental deployment when scrolling or inspecting a survivor.
+extern "C" EMSCRIPTEN_KEEPALIVE const char *DukeX_V47Marker(){
+    return "DXV47: TWO_STEP_NATIVE_CHARACTER_SELECT_ORIGINAL_MASKED_JACKPOT_COMBAT";
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V47SelectedCharacter(){return gDukeX46Choice;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V47ConfirmCharacter(){
+    if(gDukeX46Premap!=2 || gDukeX46Choice<0 || gDukeX46Choice>=5)return 0;
+    gDukeX46RequestedConfirm=1;
+    return 2;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V461TapCharacter(int x,int y){
+    if(gDukeX46Premap!=2 || x<0 || x>=320 || y<0 || y>=200)return 0;
+    if(x>=95 && x<=225 && y>=172 && y<=195)
+        return DukeX_V47ConfirmCharacter();
+    if(y>=52 && y<=137){
+        for(int i=0;i<5;++i){
+            const int center=27+i*58;
+            if(x>=center-25 && x<=center+25){
+                gDukeX46Choice=i; // highlight + update weapon/perk descriptions
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46PremapActive(){return gDukeX46Premap!=0;}
+extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V46PickCharacter(int pick){
+    if(gDukeX46Premap!=2 || pick<0 || pick>=5)return 0;
+    gDukeX46Choice=pick;return 1;
+}
+static bool DukeX46PremapScreen(){
+    if(!gDukeX46Premap)return false;
+    if(gDukeX46Premap==1){
+        gDukeX46Premap=2;
+        gDukeX46RequestedConfirm=0;gDukeX46Choice=0;
+        KB_FlushKeyboardQueue();KB_ClearKeysDown();
+    }
+    for(int i=0;i<5;++i){
+        const int keys[]={sc_1,sc_2,sc_3,sc_4,sc_5};
+        if(KB_KeyPressed(keys[i])){
+            KB_ClearKeyDown(keys[i]);gDukeX46Choice=i;
+        }
+    }
+    if(KB_KeyPressed(sc_Escape)){
+        KB_ClearKeyDown(sc_Escape);gDukeX46Premap=0;gDukeX46RequestedConfirm=0;
+        Menu_Change(MENU_SKILL);return true;
+    }
+    bool confirm=gDukeX46RequestedConfirm!=0 || KB_KeyPressed(sc_Enter) || KB_KeyPressed(sc_Space);
+    if(confirm){
+        KB_ClearKeyDown(sc_Enter);KB_ClearKeyDown(sc_Space);
+        // G_NewGame blocks waiting for ud.skill_voice to BEGIN and then STOP.
+        // The difficulty voice played before this pre-map screen; if it has
+        // already finished, the 'wait for start' loop waits forever. Clear it.
+        ud.skill_voice=0;
+        if(!DukeX_SelectLoadout(gDukeX46Choice)){
+            gDukeX46RequestedConfirm=0;
+            return true;
+        }
+        gDukeX46Premap=0;gDukeX46RequestedConfirm=0;
+        KB_FlushKeyboardQueue();KB_ClearKeysDown();
+        G_NewGame_EnterLevel();
+        return true;
+    }
+    // The five portrait slots, highlight, traits and PLAY button are entirely
+    // native Build UI. JS forwards pointer positions but draws NO menu art.
+    const char *const names[]={"DUKE CLASSIC", "DEMOLITION EXPERT", "CYBER COMMANDO",
+                               "HAZMAT SPECIALIST", "CRYO MARINE"};
+    const char *const weapons[]={"LEAD STORM", "RPG STORM", "LASER GRID",
+                                 "RADIOACTIVE AURA", "CRYO FIELD"};
+    const char *const traits[]={"BALANCED / PRECISE", "TRIPBOMB FIELD / BLAST",
+                                "SMART SEEKERS / TRACK", "ARMOR / CORROSION",
+                                "CRYO SHATTER / FREEZE"};
+    const int icons[]={SHOTSPARK1,RPG,FIRELASER,ATOMICHEALTH,FREEZEBLAST};
+    rotatesprite_fs(160<<16,100<<16,65536L,0,MENUSCREEN,24,0,10|64);
+    printext256(49,19,14,0,"DUKE X - SELECT YOUR SURVIVOR",1);
+    printext256(54,33,15,0,"TAP A CARD TO INSPECT - THEN PLAY",1);
+    for(int i=0;i<5;++i){
+        const int x=27+i*58;
+        const bool selected=i==gDukeX46Choice;
+        const int frame=13065; // original V47 ART masked selection border
+        if(tilesiz[frame].x>0){
+            rotatesprite_fs(x<<16,94<<16,54500L,0,frame,selected?-40:26,
+                            0,2|8|64);
+        }
+        if(selected){
+            // Pulsing ART glow is rendered BEHIND the original Duke portrait.
+            int const glow=13064;
+            if(tilesiz[glow].x>0)
+                rotatesprite_fs(x<<16,82<<16,52000L,0,glow,-48,0,2|8|64);
+        }
+        rotatesprite_fs(x<<16,78<<16,32768L,0,APLAYER,selected?-24:24,
+                        selected?0:7,2|8);
+        rotatesprite_fs(x<<16,104<<16,23552L,0,icons[i],0,0,2|8);
+        char digit[3]={(char)('1'+i),selected?'*':' ',0};
+        printext256(x-5,124,selected?14:7,0,digit,1);
+    }
+    char buf[130];
+    std::snprintf(buf,sizeof(buf),"SELECTED: %s",names[gDukeX46Choice]);
+    printext256(48,140,14,0,buf,1);
+    std::snprintf(buf,sizeof(buf),"STARTER: %s",weapons[gDukeX46Choice]);
+    printext256(48,151,15,0,buf,1);
+    std::snprintf(buf,sizeof(buf),"BONUS: %s",traits[gDukeX46Choice]);
+    printext256(48,161,7,0,buf,1);
+    if(tilesiz[13066].x>0)
+        rotatesprite_fs(160<<16,183<<16,58000L,0,13066,-18,0,2|8|64);
+    printext256(139,181,14,0,"PLAY",1);
+    printext256(8,194,7,0,"1-5: SELECT  ENTER: PLAY  ESC: BACK",1);
+    return true;
+}
 #endif
 
 // common positions
@@ -4901,8 +5026,16 @@ static void Menu_EntryLinkActivate(MenuEntry_t *entry)
         ud.m_respawn_inventory = 0;
 
         ud.multimode = 1;
-
+#ifdef __EMSCRIPTEN__
+        // Don't let G_NewGame's sound-start wait deadlock after the player
+        // spends time on character select (see G_NewGame in premap.cpp).
+        ud.skill_voice=0;
+        gDukeX46Premap=1;
+        gDukeX46Choice=0;
+        gDukeX46RequestedConfirm=0;
+#else
         G_NewGame_EnterLevel();
+#endif
         break;
     }
 
@@ -9289,6 +9422,9 @@ void M_DisplayMenus(void)
     vec2_t origin = { 0, 0 }, previousOrigin = { 0, 0 };
 
     Net_GetPackets();
+#ifdef __EMSCRIPTEN__
+    if(DukeX46PremapScreen())return;
+#endif
 #ifdef NETMENU
     // -join CODE (cmdline): fire the same path the Join-by-Code menu entry
     // uses, once, as soon as the menu system is alive. Works with the 12-char
