@@ -1262,7 +1262,9 @@ static void StartChestReveal(int seat){
     Fighter preview=f; // reserve capacity as we roll; never silently discard a jackpot slot
     chestReveal=ChestReveal{};
     chestReveal.seat=seat;
-    chestReveal.icon=V47Art(0,EditionTile(CANWITHSOMETHING,TRASH));
+    // Prefer the player's own Duke trash-can art when available;
+    // fall back to the bundled masked can only when the GRP lacks it.
+    chestReveal.icon=EditionTile(CANWITHSOMETHING,V47Art(0,TRASH));
     chestReveal.count=DukeXV46::ChestRewardCount(RandomBounded(10000),1);
     bool chosen[kSkillCount]={};
     for(int j=0;j<chestReveal.count;++j){
@@ -1292,10 +1294,25 @@ static void StartChestReveal(int seat){
             }
         }
         int options[kSkillCount],total=0;
-        for(int id=0;id<kSkillCount;++id)
-            if(!chosen[id] && CanOfferSkill(preview,id))options[total++]=id;
+        int upgrades[kSkillCount],upCount=0;
+        int news[kSkillCount],newCount=0;
+        for(int id=0;id<kSkillCount;++id){
+            if(chosen[id] || !CanOfferSkill(preview,id))continue;
+            options[total++]=id;
+            if(preview.skill[id]>0)upgrades[upCount++]=id;
+            else news[newCount++]=id;
+        }
         if(!total){chestReveal.count=j;break;}
-        int id=options[RandomBounded((uint32_t)total)];
+        int id=-1;
+        if(upCount>0 && newCount>0){
+            // Chest loot should feel rewarding: weight toward upgrades while
+            // still surfacing NEW builds when the player has room for them.
+            id=(RandomBounded(100)<58)
+                ? upgrades[RandomBounded((uint32_t)upCount)]
+                : news[RandomBounded((uint32_t)newCount)];
+        }else if(upCount>0) id=upgrades[RandomBounded((uint32_t)upCount)];
+        else if(newCount>0) id=news[RandomBounded((uint32_t)newCount)];
+        else id=options[RandomBounded((uint32_t)total)];
         chestReveal.reward[j]=id;
         chestReveal.rarity[j]=(uint8_t)DukeXV46::RollRarity(RandomBounded(10000),f.skill[18]+2);
         chosen[id]=true;
@@ -1365,6 +1382,7 @@ static void DrawTwistSelection(){
     // keyboard choices are handled by engine-level upgrade key dispatch.
     if(twistChoice.frames>kHz*25)ChooseTwist(1);
 }
+// DXV48_3: TRASH_CAN_REAL_ART_SMALL_LEFT_HUD
 // DXV47_JACKPOT: a native Build HUD reveal, deliberately independent from
 // Emscripten DOM. Own masked indexed ART, paused simulation, bounded visual
 // sprites and deterministic animation positions. No extra world sprite pool.
@@ -1393,8 +1411,8 @@ static void DrawChestReveal(){
     if(HasArt(kV47ArtBase+12))
         rotatesprite_fs(160<<16,100<<16,65536L,0,V47Art(12),0,0,2|8|64);
     const int accent=count>=5?14:count>=3?7:15;
-    printext256(60,16,accent,0,"RAT RAID - TRASH JACKPOT",1);
-    printext256(59,29,15,0,"ELITE SALVAGE  //  LOOT REVEAL",1);
+    printext256(72,16,accent,0,"TRASH JACKPOT",1);
+    printext256(71,29,15,0,"ELITE SALVAGE // LOOT REVEAL",1);
     // 16 original pixel-art sunshafts burst behind an increasingly open can.
     // Rays are masked pixels, not translucent solid quads or stock TRASH art.
     const int rays=12;
@@ -1403,14 +1421,15 @@ static void DrawChestReveal(){
         const int length=Clamp((tick<44?tick*1100:54000)-(i%3)*2000,0,62000);
         ChestArt(160,86,length,angle,7,-15,0);
     }
+    const int chestTile=HasArt(chestReveal.icon)?chestReveal.icon:V47Art(0);
     if(tick<72){
-        ChestArt(160+(tick%4-2),93,57000+(tick%19)*900,0,0,-9);
+        rotatesprite_fs((160+(tick%4-2))<<16,93<<16,56000L+(tick%19)*900,0,chestTile,-9,0,2|8|64);
         if(tick>30){
             ChestArt(159+(tick*4%27)-13,51-(tick-30),32000,(-tick*17)&2047,2,-10);
             ChestArt(160,73,44000,0,1,-15);
         }
     }else{
-        ChestArt(160,84,63000,0,1,-19);
+        rotatesprite_fs(160<<16,84<<16,62000L,0,chestTile,-19,0,2|8|64);
     }
     // Rats and flying trash are original 255-masked indexed sprites. They
     // follow curved ballistic paths, never spinning the prize art itself.
@@ -1451,8 +1470,8 @@ static void DrawChestReveal(){
             const int reelIndex=(tick/Max(3,13-j*2)+j*23)%kSkillCount;
             const int icon=ChestIconFor(stopped?id:reelIndex,stopped&&chestReveal.fusion[j]);
             const int x=first+j*spacing;
-            if(HasArt(kV47ArtBase+11))ChestArt(x,106,39000,0,11,stopped?-28:15);
-            rotatesprite_fs(x<<16,106<<16,23500L,0,icon,stopped?-24:8,0,2|8|64);
+            if(HasArt(kV47ArtBase+9))ChestArt(x,106,30000,0,9,stopped?-20:10);
+            rotatesprite_fs(x<<16,106<<16,18000L,0,icon,stopped?-20:6,0,2|8|64);
             if(stopped){
                 const int rarity=Clamp(chestReveal.rarity[j],0,5);
                 const int color=rarity>=5?14:rarity==4?7:rarity==3?13:rarity==2?12:15;
@@ -1460,7 +1479,7 @@ static void DrawChestReveal(){
                 std::snprintf(label,sizeof(label),"%s",rarity==5?"MYTHIC":
                     rarity==4?"LEGEND":rarity==3?"EPIC":rarity==2?"RARE":
                     rarity==1?"UNCOMMON":"COMMON");
-                printext256(x-25,129,color,0,label,1);
+                printext256(x-25,123,color,0,label,1);
             }
         }
         if(tick>=185){
@@ -4017,17 +4036,16 @@ static void Tick(){
 }
 // DXV48_COMPACT_HUD: 10 compact native icon cells, no full-width telemetry.
 static void DrawStatCell(int centerX,int centerY,int tile,int value,int pal=0){
-    const int plate=V47Art(11); // original masked plate/frame, not HTML overlay
-    if(HasArt(plate))rotatesprite_fs(centerX<<16,centerY<<16,35000L,0,
-                                     plate,14,0,2|8|64);
+    const int plate=V47Art(9); // plain masked frame with transparent interior
+    if(HasArt(plate))rotatesprite_fs(centerX<<16,centerY<<16,17000L,0,
+                                     plate,8,0,2|8|64);
     if(!HasArt(tile))tile=SHOTSPARK1;
-    rotatesprite_fs((centerX-15)<<16,centerY<<16,13000L,0,
-                    tile,-24,pal,2|8|64);
+    rotatesprite_fs((centerX-8)<<16,centerY<<16,7000L,0,
+                    tile,-16,pal,2|8|64);
     char buf[15];
     if(value>=10000)std::snprintf(buf,sizeof(buf),"%dK",value/1000);
     else std::snprintf(buf,sizeof(buf),"%d",value);
-    // One short number, with a sprite icon as its semantic label.
-    printext256(centerX-4,centerY-4,15,0,buf,1);
+    printext256(centerX+2,centerY-3,15,0,buf,1);
 }
 static void DrawHUD(){
     if(!initialized||!Alive(myconnectindex))return;
@@ -4045,18 +4063,19 @@ static void DrawHUD(){
         rotatesprite_fs((47+j*10)<<16,6<<16,8000L,0,
                         crystal,j<filled?-32:52,j<filled?7:0,2|8|64);
     auto const p=g_player[myconnectindex].ps;
-    const int leftX=33,rightX=87;
-    DrawStatCell(leftX,23,ATOMICHEALTH,Max(0,sprite[p->i].extra),0);
-    DrawStatCell(rightX,23,HEAVYHBOMB,p->inv_amount[GET_SHIELD],0);
-    DrawStatCell(leftX,44,RAT,activeEnemies,0);
-    DrawStatCell(rightX,44,RPGAMMO,wave,0);
-    DrawStatCell(leftX,65,SHOTSPARK1,f.kills,0);
-    DrawStatCell(rightX,65,TRIPBOMB,tripwireDetonations,0);
-    DrawStatCell(leftX,86,CRYSTALAMMO,careerCredits,0);
-    DrawStatCell(rightX,86,RPG,EquippedWeapons(f),0);
-    DrawStatCell(leftX,107,crystal,xpVacuum.ticks>0?xpVacuum.ticks/kHz:0,
+    // Compact two-column stat strip pinned hard-left to free the playfield.
+    const int leftX=12,rightX=34;
+    DrawStatCell(leftX,22,ATOMICHEALTH,Max(0,sprite[p->i].extra),0);
+    DrawStatCell(rightX,22,HEAVYHBOMB,p->inv_amount[GET_SHIELD],0);
+    DrawStatCell(leftX,38,RAT,activeEnemies,0);
+    DrawStatCell(rightX,38,RPGAMMO,wave,0);
+    DrawStatCell(leftX,54,SHOTSPARK1,f.kills,0);
+    DrawStatCell(rightX,54,TRIPBOMB,tripwireDetonations,0);
+    DrawStatCell(leftX,70,CRYSTALAMMO,careerCredits,0);
+    DrawStatCell(rightX,70,RPG,EquippedWeapons(f),0);
+    DrawStatCell(leftX,86,crystal,xpVacuum.ticks>0?xpVacuum.ticks/kHz:0,
                  xpVacuum.ticks>0?7:0);
-    DrawStatCell(rightX,107,FREEZEBLAST,(gameTicks/kHz)/60,0);
+    DrawStatCell(rightX,86,FREEZEBLAST,(gameTicks/kHz)/60,0);
     // A discrete chest arrow is retained without full-width debug text.
     int nearbyChest=-1;int64_t nearSq=INT64_MAX;
     auto const &playerPos=sprite[p->i];
@@ -4074,9 +4093,9 @@ static void DrawHUD(){
         printext256(303,19,14,0,dir,1);
     }
     if(lastBoon>=0 && gameTicks<lastBoonUntil)
-        printext256(8,125,lastBoon>=8?2:14,0,lastBoon>=8?"BANE":"BOON",1);
+        printext256(4,104,lastBoon>=8?2:14,0,lastBoon>=8?"BANE":"BOON",1);
     if(xpVacuum.ticks>0)
-        printext256(8,136,7,0,"XP SWEEP",1);
+        printext256(4,114,7,0,"XP",1);
     // All non-Web builds have a genuine engine-rendered selection screen.
     // Browser builds use the richer HTML cards; game rules stay in C++.
 #ifndef __EMSCRIPTEN__
@@ -4708,6 +4727,10 @@ extern "C" EMSCRIPTEN_KEEPALIVE int DukeX_V47TransformerReactions(){return DukeX
 
 // DXV48: compact native HUD, genuinely paused solo modals, fast XP and
 // level-wide collectible vacuum. Required marker for WASM/GitHub publish.
+// DXV48_3: stable, link-verifiable export for the new native HUD/jackpot.
+extern "C" EMSCRIPTEN_KEEPALIVE const char* DukeX_V48_3Marker(){
+    return "DXV48_3: TRASH_CAN_REAL_ART_SMALL_LEFT_HUD";
+}
 extern "C" EMSCRIPTEN_KEEPALIVE const char* DukeX_V48Marker(){
     return "DXV48: XP_GLOBAL_VACUUM_COMPACT_NATIVE_HUD_MODAL_FREEZE";
 }
